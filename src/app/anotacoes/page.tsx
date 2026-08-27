@@ -5,7 +5,7 @@ import {
   BookOpen, Calendar, ArrowLeft, Search, Filter, 
   Trash2, BrainCircuit, Sparkles, X, Award, RotateCcw, 
   Presentation, ChevronLeft, ChevronRight, Copy, Check, Mic, Loader2, CheckCircle,
-  Download
+  Download, Printer, Table as TableIcon, FileText, Layers
 } from 'lucide-react';
 import Link from 'next/link';
 import pptxgen from 'pptxgenjs';
@@ -57,10 +57,11 @@ interface Note {
 export default function NotesPage() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
+  const [detailModalNote, setDetailModalNote] = useState<Note | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSubject, setSelectedSubject] = useState<string>('all');
 
-  // Estados de Carregamento por Card
+  // Estados de Carregamento
   const [loadingStudyId, setLoadingStudyId] = useState<string | null>(null);
   const [loadingSlidesId, setLoadingSlidesId] = useState<string | null>(null);
 
@@ -146,16 +147,16 @@ export default function NotesPage() {
     if (typeof window !== 'undefined') {
       localStorage.setItem('notai_notes', JSON.stringify(updated));
     }
-    if (selectedNote?.id === id) {
-      setSelectedNote(null);
-    }
+    if (detailModalNote?.id === id) setDetailModalNote(null);
+    if (selectedNote?.id === id) setSelectedNote(null);
   };
 
-  const handleGenerateStudyMaterials = async (note: Note) => {
+  const handleGenerateStudyMaterials = async (note: Note, initialTab: 'flashcards' | 'quiz' = 'flashcards') => {
     setSelectedNote(note);
     setFlashcards([]);
     setQuizQuestions([]);
     setPresentation(null);
+    setStudyTab(initialTab);
     setLoadingStudyId(note.id);
 
     try {
@@ -178,7 +179,7 @@ export default function NotesPage() {
         setSelectedQuizAnswers({});
         setShowQuizResults(false);
       } else {
-        alert(`Erro: ${data.error || 'Não foi possível gerar os flashcards.'}`);
+        alert(`Erro: ${data.error || 'Não foi possível gerar o material de estudo.'}`);
       }
     } catch (err: any) {
       alert(`Falha na conexão: ${err.message || 'Erro inesperado'}`);
@@ -250,12 +251,11 @@ export default function NotesPage() {
       align: 'center',
     });
 
-    // Slides de Conteúdo com Notas do Orador
+    // Slides com Anotações de Orador
     presentation.slides.forEach((slide) => {
       const s = pptx.addSlide();
       s.background = { color: '020617' };
 
-      // Título
       s.addText(slide.title, {
         x: 0.8,
         y: 0.6,
@@ -266,7 +266,6 @@ export default function NotesPage() {
         color: 'F8FAFC',
       });
 
-      // Tópicos
       const bulletText = slide.bulletPoints.map((bp) => ({
         text: bp,
         options: { fontSize: 16, color: 'CBD5E1', bullet: true, breakLine: true, spacing: { line: 32 } },
@@ -280,7 +279,6 @@ export default function NotesPage() {
         align: 'left',
       });
 
-      // Roteiro do Apresentador
       if (slide.speakerNotes) {
         s.addNotes(`Roteiro de Apresentação (NOTAÍ):\n\n${slide.speakerNotes}`);
       }
@@ -288,6 +286,140 @@ export default function NotesPage() {
 
     const fileName = `${(presentation.presentationTitle || 'apresentacao').replace(/\s+/g, '_')}.pptx`;
     pptx.writeFile({ fileName });
+  };
+
+  const handleExportFile = (note: Note) => {
+    const act = note.activityData;
+    if (!act) return;
+
+    let content = `# NOTAÍ - ${act.topic || note.title}\n\n`;
+    content += `**Disciplina:** ${note.subject}\n`;
+    content += `**Tipo:** ${act.type || note.tag}\n`;
+    content += `**Data:** ${note.date}\n\n`;
+
+    if (act.type === 'Mapa Mental' && act.nodes) {
+      content += `## Estrutura do Mapa Mental:\n\n`;
+      act.nodes.forEach((n: any) => {
+        content += `### ${n.category}\n`;
+        n.items?.forEach((it: string) => { content += `- ${it}\n`; });
+        content += '\n';
+      });
+    } else if (act.type === 'Tabela Comparativa' && act.table) {
+      content += `## Tabela Comparativa:\n\n`;
+      content += `| ${act.table.headers.join(' | ')} |\n`;
+      content += `| ${act.table.headers.map(() => '---').join(' | ')} |\n`;
+      act.table.rows.forEach((r: string[]) => {
+        content += `| ${r.join(' | ')} |\n`;
+      });
+    } else if (act.type === 'Resumo Estruturado' && act.summary) {
+      content += `## Resumo Estruturado:\n\n`;
+      act.summary.forEach((s: any) => {
+        content += `### ${s.section}\n${s.content}\n\n`;
+      });
+    }
+
+    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `${(note.title || 'anotacao').replace(/\s+/g, '_')}_notai.md`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handlePrintPDF = (note: Note) => {
+    const act = note.activityData;
+    if (!act) return;
+
+    let bodyHTML = '';
+    if (act.type === 'Mapa Mental' && act.nodes) {
+      bodyHTML = `
+        <div style="display: flex; justify-content: center; margin: 20px 0;">
+          <div style="background: #4f46e5; color: white; padding: 12px 24px; border-radius: 8px; font-weight: bold; font-size: 16px;">
+            🧠 ${act.topic || note.title}
+          </div>
+        </div>
+        <div style="grid-template-columns: repeat(2, 1fr); display: grid; gap: 16px; margin-top: 20px;">
+          ${act.nodes.map((n: any) => `
+            <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 16px;">
+              <h4 style="color: #4f46e5; margin: 0 0 10px 0; text-transform: uppercase; font-size: 13px; font-weight: bold;">${n.category}</h4>
+              <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: #334155; line-height: 1.6;">
+                ${n.items?.map((it: string) => `<li>${it}</li>`).join('')}
+              </ul>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    } else if (act.type === 'Tabela Comparativa' && act.table) {
+      bodyHTML = `
+        <table style="width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 13px;">
+          <thead>
+            <tr style="background: #f1f5f9; border-bottom: 2px solid #cbd5e1; color: #0f172a;">
+              ${act.table.headers.map((h: string) => `<th style="padding: 12px; text-align: left; font-weight: bold;">${h}</th>`).join('')}
+            </tr>
+          </thead>
+          <tbody>
+            ${act.table.rows.map((row: string[]) => `
+              <tr style="border-bottom: 1px solid #e2e8f0;">
+                ${row.map((cell: string, idx: number) => `<td style="padding: 12px; color: #334155; ${idx === 0 ? 'font-weight: bold; color: #0f172a;' : ''}">${cell}</td>`).join('')}
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    } else if (act.type === 'Resumo Estruturado' && act.summary) {
+      bodyHTML = `
+        <div style="margin-top: 20px; display: flex; flex-direction: column; gap: 16px;">
+          ${act.summary.map((s: any) => `
+            <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 16px;">
+              <h3 style="color: #2563eb; margin: 0 0 8px 0; font-size: 14px; font-weight: bold;">${s.section}</h3>
+              <p style="margin: 0; color: #334155; font-size: 13px; line-height: 1.6;">${s.content}</p>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>${note.title} - NOTAÍ</title>
+          <style>
+            @page { size: A4; margin: 20mm; }
+            body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif; color: #0f172a; margin: 0; padding: 0; }
+            .header { border-bottom: 2px solid #4f46e5; padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-end; }
+            .title { font-size: 22px; font-weight: bold; color: #0f172a; margin: 0; }
+            .meta { font-size: 12px; color: #64748b; margin-top: 6px; }
+            .badge { background: #e0e7ff; color: #4338ca; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; display: inline-block; }
+            .footer { margin-top: 40px; border-top: 1px solid #e2e8f0; padding-top: 12px; text-align: center; font-size: 11px; color: #94a3b8; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <div style="font-size: 12px; font-weight: bold; color: #4f46e5; letter-spacing: 1px; margin-bottom: 4px;">NOTAÍ • IA EDUCACIONAL</div>
+              <h1 class="title">${note.title}</h1>
+              <div class="meta">Disciplina: <strong>${note.subject}</strong> | Data: ${note.date}</div>
+            </div>
+            <div class="badge">${note.tag}</div>
+          </div>
+          ${bodyHTML}
+          <div class="footer">Gerado automaticamente por NOTAÍ - Inteligência Artificial para Sala de Aula</div>
+          <script>
+            window.onload = function() {
+              window.print();
+              setTimeout(() => { window.close(); }, 500);
+            }
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
   };
 
   const handleCopySpeakerNotes = (text: string) => {
@@ -378,7 +510,8 @@ export default function NotesPage() {
             return (
               <div
                 key={note.id}
-                className="bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-2xl p-5 flex flex-col justify-between space-y-4 transition group"
+                onClick={() => setDetailModalNote(note)}
+                className="bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-2xl p-5 flex flex-col justify-between space-y-4 transition group cursor-pointer"
               >
                 <div className="space-y-2.5">
                   <div className="flex items-center justify-between">
@@ -409,7 +542,7 @@ export default function NotesPage() {
                 </div>
 
                 {/* Botões de Ação do Card */}
-                <div className="pt-3 border-t border-slate-800/80 flex flex-col gap-2">
+                <div className="pt-3 border-t border-slate-800/80 flex flex-col gap-2" onClick={(e) => e.stopPropagation()}>
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       onClick={() => handleGenerateStudyMaterials(note)}
@@ -458,6 +591,158 @@ export default function NotesPage() {
           })
         )}
       </div>
+
+      {/* MODAL: DETALHES DA ANOTAÇÃO (TABELA / MAPA / RESUMO) */}
+      {detailModalNote && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 w-full max-w-4xl rounded-3xl p-6 md:p-8 space-y-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+            
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-indigo-600/20 text-indigo-400 rounded-xl border border-indigo-500/30">
+                  {detailModalNote.activityData?.type === 'Tabela Comparativa' ? <TableIcon className="w-5 h-5" /> :
+                   detailModalNote.activityData?.type === 'Resumo Estruturado' ? <FileText className="w-5 h-5" /> :
+                   <Layers className="w-5 h-5" />}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-lg font-bold text-white">{detailModalNote.title}</h3>
+                    <span className="text-xs bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded border border-indigo-500/30">
+                      {detailModalNote.subject}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    {detailModalNote.tag} • Salvo em {detailModalNote.date}
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setDetailModalNote(null)} 
+                className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Conteúdo Renderizado */}
+            <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800 space-y-6">
+              {detailModalNote.activityData?.type === 'Mapa Mental' && (
+                <>
+                  <div className="flex justify-center">
+                    <div className="bg-indigo-600 text-white font-bold px-6 py-3 rounded-xl shadow-lg shadow-indigo-600/30 text-center text-sm md:text-base">
+                      🧠 {detailModalNote.title}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {detailModalNote.activityData.nodes?.map((node: any, i: number) => (
+                      <div key={i} className="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-2">
+                        <span className="text-xs font-bold text-indigo-400 uppercase tracking-wide">{node.category}</span>
+                        {node.items?.map((item: string, idx: number) => (
+                          <p key={idx} className="text-xs text-slate-300 leading-relaxed">• {item}</p>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {detailModalNote.activityData?.type === 'Tabela Comparativa' && detailModalNote.activityData.table && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-800 text-xs uppercase tracking-wider text-emerald-400 bg-slate-900/60">
+                        {detailModalNote.activityData.table.headers.map((head: string, idx: number) => (
+                          <th key={idx} className="p-3.5 font-bold">{head}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 text-xs text-slate-300">
+                      {detailModalNote.activityData.table.rows.map((row: string[], rIdx: number) => (
+                        <tr key={rIdx} className="hover:bg-slate-900/40 transition">
+                          {row.map((cell: string, cIdx: number) => (
+                            <td key={cIdx} className={`p-3.5 ${cIdx === 0 ? 'font-semibold text-slate-200' : ''}`}>
+                              {cell}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {detailModalNote.activityData?.type === 'Resumo Estruturado' && detailModalNote.activityData.summary && (
+                <div className="space-y-4">
+                  {detailModalNote.activityData.summary.map((section: any, idx: number) => (
+                    <div key={idx} className="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-2">
+                      <h4 className="text-sm font-bold text-blue-400">{section.section}</h4>
+                      <p className="text-xs text-slate-300 leading-relaxed">{section.content}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {!detailModalNote.activityData && (
+                <p className="text-xs text-slate-300 leading-relaxed">{detailModalNote.description}</p>
+              )}
+            </div>
+
+            {/* Barra Inferior com todos os botões de ação */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
+              <span className="text-xs text-slate-400">Material completo salvo no histórico</span>
+              
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                <button 
+                  onClick={() => handlePrintPDF(detailModalNote)}
+                  className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white text-xs font-semibold px-3 py-2 rounded-xl border border-rose-500/30 transition"
+                >
+                  <Printer className="w-3.5 h-3.5" /> PDF
+                </button>
+
+                <button 
+                  onClick={() => handleExportFile(detailModalNote)}
+                  className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3 py-2 rounded-xl border border-slate-700 transition"
+                >
+                  <Download className="w-3.5 h-3.5" /> Baixar (.md)
+                </button>
+
+                <button 
+                  onClick={() => handleGeneratePresentation(detailModalNote)}
+                  disabled={loadingSlidesId === detailModalNote.id}
+                  className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold px-3.5 py-2 rounded-xl transition shadow-md disabled:opacity-50"
+                >
+                  {loadingSlidesId === detailModalNote.id ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Gerando Slides...
+                    </>
+                  ) : (
+                    <>
+                      <Presentation className="w-3.5 h-3.5" /> Gerar Slides (.pptx)
+                    </>
+                  )}
+                </button>
+
+                <button 
+                  onClick={() => handleGenerateStudyMaterials(detailModalNote, 'quiz')}
+                  disabled={loadingStudyId === detailModalNote.id}
+                  className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-3.5 py-2 rounded-xl transition disabled:opacity-50"
+                >
+                  <Award className="w-3.5 h-3.5" /> Iniciar Quiz
+                </button>
+
+                <button 
+                  onClick={() => handleGenerateStudyMaterials(detailModalNote, 'flashcards')}
+                  disabled={loadingStudyId === detailModalNote.id}
+                  className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-3.5 py-2 rounded-xl transition shadow-lg shadow-indigo-600/20 disabled:opacity-50"
+                >
+                  <Sparkles className="w-3.5 h-3.5" /> Flashcards
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
 
       {/* MODAL 1: APRESENTAÇÃO DE SLIDES & PPTX DOWNLOAD */}
       {presentation && selectedNote && (
