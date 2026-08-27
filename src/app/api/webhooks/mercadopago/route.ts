@@ -31,15 +31,10 @@ export async function POST(request: Request) {
     }
 
     const paymentId = queryId || body?.data?.id || body?.id;
-    const action = body?.action || body?.type || queryTopic;
-
-    console.log('[Webhook MP] Recebido:', { paymentId, action });
 
     if (paymentId) {
       const payment = new Payment(client);
       const paymentData = await payment.get({ id: String(paymentId) });
-
-      console.log('[Webhook MP] Status do pagamento:', paymentData.status);
 
       if (paymentData.status === 'approved' && paymentData.external_reference) {
         let referenceData: { userId?: string; planKey?: string } = {};
@@ -47,7 +42,6 @@ export async function POST(request: Request) {
         try {
           referenceData = JSON.parse(paymentData.external_reference);
         } catch {
-          // Caso a external_reference seja apenas o userId puro
           referenceData = { userId: paymentData.external_reference, planKey: 'plus' };
         }
 
@@ -55,13 +49,18 @@ export async function POST(request: Request) {
 
         if (userId) {
           const targetPlan = planKey || 'plus';
+          
+          // Configurações de acordo com as colunas reais da sua tabela profiles
+          const maxClasses = targetPlan === 'pro' ? 9999 : targetPlan === 'plus' ? 9999 : 3;
+          const maxMinutes = targetPlan === 'pro' ? 120 : targetPlan === 'plus' ? 60 : 15;
 
           const { error, data } = await supabaseAdmin
             .from('profiles')
             .update({
               plan: targetPlan,
-              classes_count_month: 0,
-              updated_at: new Date().toISOString(),
+              classes_used_this_month: 0,
+              max_classes_month: maxClasses,
+              max_audio_minutes: maxMinutes,
             })
             .eq('id', userId)
             .select();
@@ -69,7 +68,7 @@ export async function POST(request: Request) {
           if (error) {
             console.error('[Webhook MP] Erro ao atualizar Supabase:', error);
           } else {
-            console.log('[Webhook MP] Usuário promovido com sucesso:', data);
+            console.log('[Webhook MP] Conta promovida com sucesso:', data);
           }
         }
       }
@@ -77,7 +76,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ received: true }, { status: 200 });
   } catch (error: any) {
-    console.error('[Webhook MP] Erro interno:', error);
+    console.error('[Webhook MP] Erro:', error);
     return NextResponse.json({ received: true }, { status: 200 });
   }
 }
