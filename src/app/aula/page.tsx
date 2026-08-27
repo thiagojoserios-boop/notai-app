@@ -70,18 +70,13 @@ export default function LiveClass() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [currentTime, setCurrentTime] = useState('');
 
-  // Estados do Microfone
-  const [isListening, setIsListening] = useState(false);
-  const [interimText, setInterimText] = useState('');
-  const [speechSupported, setSpeechSupported] = useState(true);
-  const recognitionRef = useRef<any>(null);
-  const isListeningRef = useRef<boolean>(false);
-  const userProfileRef = useRef<UserProfile | null>(null);
-
-  // Atualizar ref do perfil para evitar recriação do SpeechRecognition
-  useEffect(() => {
-    userProfileRef.current = userProfile;
-  }, [userProfile]);
+  // Estados de Gravação Real (MediaRecorder)
+  const [isRecording, setIsRecording] = useState(false);
+  const [isProcessingAudio, setIsProcessingAudio] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Estados de Upload de Arquivo
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -135,94 +130,28 @@ export default function LiveClass() {
     return () => clearInterval(interval);
   }, []);
 
-  // Cronômetro
+  // Limpeza de stream ao desmontar tela
   useEffect(() => {
-    let timer: any;
-    if (isListening) {
-      timer = setInterval(() => {
-        setElapsedSeconds((prev) => prev + 1);
-      }, 1000);
-    } else {
-      setElapsedSeconds(0);
-    }
-    return () => clearInterval(timer);
-  }, [isListening]);
-
-  // Reconhecimento de Voz (Executa uma única vez no mount)
-  useEffect(() => {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      setSpeechSupported(false);
-      return;
-    }
-
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = 'pt-BR';
-
-    recognition.onresult = (event: any) => {
-      let currentInterim = '';
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        const transcriptPart = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          if (transcriptPart.trim()) {
-            processWithAI(transcriptPart.trim());
-          }
-          currentInterim = '';
-        } else {
-          currentInterim += transcriptPart;
-        }
-      }
-      setInterimText(currentInterim);
-    };
-
-    recognition.onerror = (event: any) => {
-      console.warn('Evento de áudio:', event.error);
-      if (event.error === 'not-allowed') {
-        isListeningRef.current = false;
-        setIsListening(false);
-        alert('Permissão de microfone negada. Autorize no navegador.');
-      }
-    };
-
-    recognition.onend = () => {
-      if (isListeningRef.current) {
-        try {
-          recognition.start();
-        } catch (e) {}
-      } else {
-        setIsListening(false);
-      }
-    };
-
-    recognitionRef.current = recognition;
-
     return () => {
-      isListeningRef.current = false;
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch (e) {}
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
       }
     };
   }, []);
 
   const checkQuotaAndProceed = (): boolean => {
-    const profile = userProfileRef.current;
-    if (!profile) {
+    if (!userProfile) {
       setShowAuthModal(true);
       return false;
     }
 
     if (
-      profile.plan === 'free' &&
-      profile.classes_used_this_month >= profile.max_classes_month
+      userProfile.plan === 'free' &&
+      userProfile.classes_used_this_month >= userProfile.max_classes_month
     ) {
       setUpgradeReason(
-        `Você atingiu o limite de ${profile.max_classes_month} aulas gratuitas deste mês no plano Free.`
+        `Você atingiu o limite de ${userProfile.max_classes_month} aulas gratuitas deste mês no plano Free.`
       );
       setShowUpgradeModal(true);
       return false;
@@ -232,17 +161,16 @@ export default function LiveClass() {
   };
 
   const incrementClassUsage = async () => {
-    const profile = userProfileRef.current;
-    if (!profile || !isSupabaseConfigured || !supabase) return;
+    if (!userProfile || !isSupabaseConfigured || !supabase) return;
     try {
-      const nextCount = profile.classes_used_this_month + 1;
+      const nextCount = userProfile.classes_used_this_month + 1;
       await supabase
         .from('profiles')
         .update({ classes_used_this_month: nextCount })
-        .eq('id', profile.id);
+        .eq('id', userProfile.id);
 
       setUserProfile({
-        ...profile,
+        ...userProfile,
         classes_used_this_month: nextCount,
       });
     } catch (err) {
@@ -250,27 +178,98 @@ export default function LiveClass() {
     }
   };
 
-  const toggleListening = () => {
-    if (!recognitionRef.current) return;
+  // Iniciar Gravação Real de Áudio
+  const startRecording = async () => {
+    if (!checkQuotaAndProceed()) return;
 
-    if (isListening) {
-      isListeningRef.current = false;
-      recognitionRef.current.stop();
-      setIsListening(false);
-      setInterimText('');
-    } else {
-      if (!checkQuotaAndProceed()) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
 
-      try {
-        isListeningRef.current = true;
-        recognitionRef.current.start();
-        setIsListening(true);
-        if (transcript.length === 0) {
-          incrementClassUsage();
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : 'audio/webm';
+
+      const mediaRecorder = new MediaRecorder(stream, { mimeType });
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
         }
-      } catch (err) {
-        console.error('Erro ao iniciar microfone:', err);
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        if (audioBlob.size > 0) {
+          await processAudioBlob(audioBlob);
+        }
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((track) => track.stop());
+          streamRef.current = null;
+        }
+      };
+
+      mediaRecorder.start(1000); // grava chunks a cada 1 segundo
+      setIsRecording(true);
+      setElapsedSeconds(0);
+
+      timerRef.current = setInterval(() => {
+        setElapsedSeconds((prev) => prev + 1);
+      }, 1000);
+
+    } catch (err) {
+      console.error('Erro ao acessar o microfone:', err);
+      alert('Não foi possível acessar o microfone. Verifique as permissões.');
+    }
+  };
+
+  // Parar Gravação e enviar para IA
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    setIsRecording(false);
+  };
+
+  const processAudioBlob = async (blob: Blob) => {
+    setIsProcessingAudio(true);
+    const audioFile = new File([blob], 'gravacao-aula.webm', { type: blob.type || 'audio/webm' });
+    const formData = new FormData();
+    formData.append('audio', audioFile);
+
+    try {
+      const res = await fetch('/api/analyze-audio', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro ao processar áudio.');
+
+      if (data.transcripts && Array.isArray(data.transcripts)) {
+        setTranscript((prev) => [...prev, ...data.transcripts]);
       }
+      if (data.subject) setDetectedSubject(data.subject);
+      if (data.hasExamAlert && data.examAlertText) {
+        setImportantPoints((prev) => [...prev, data.examAlertText]);
+      }
+      if (data.hasActivity && data.activity) {
+        setDetectedActivity(data.activity);
+        setShowResultModal(true);
+      }
+
+      incrementClassUsage();
+    } catch (err: any) {
+      console.error('Erro na transcrição:', err);
+      alert(`Aviso: ${err.message || 'Falha ao processar gravação.'}`);
+    } finally {
+      setIsProcessingAudio(false);
     }
   };
 
@@ -295,14 +294,10 @@ export default function LiveClass() {
 
       const data = await response.json();
 
-      if (data.subject) {
-        setDetectedSubject(data.subject);
-      }
-
+      if (data.subject) setDetectedSubject(data.subject);
       if (data.hasExamAlert && data.examAlertText) {
         setImportantPoints((prev) => [...prev, data.examAlertText]);
       }
-
       if (data.hasActivity && data.activity) {
         setDetectedActivity(data.activity);
       }
@@ -319,14 +314,6 @@ export default function LiveClass() {
 
     if (!checkQuotaAndProceed()) return;
 
-    if (userProfile?.plan === 'free' && selectedFile.size > 25 * 1024 * 1024) {
-      setUpgradeReason(
-        'Arquivos de áudio maiores que 15 minutos são exclusivos dos planos Plus e Pro.'
-      );
-      setShowUpgradeModal(true);
-      return;
-    }
-
     setUploadLoading(true);
     const formData = new FormData();
     formData.append('audio', selectedFile);
@@ -338,23 +325,15 @@ export default function LiveClass() {
       });
 
       const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Falha ao processar o áudio no servidor.');
-      }
+      if (!res.ok) throw new Error(data.error || 'Falha ao processar o áudio no servidor.');
 
       if (data.transcripts && Array.isArray(data.transcripts)) {
         setTranscript(data.transcripts);
       }
-
-      if (data.subject) {
-        setDetectedSubject(data.subject);
-      }
-
+      if (data.subject) setDetectedSubject(data.subject);
       if (data.hasExamAlert && data.examAlertText) {
         setImportantPoints((prev) => [...prev, data.examAlertText]);
       }
-
       if (data.hasActivity && data.activity) {
         setDetectedActivity(data.activity);
         setShowResultModal(true);
@@ -490,7 +469,7 @@ export default function LiveClass() {
         reason={upgradeReason}
       />
 
-      {/* OVERLAY: MODO DISCRETO (OLED PURA) */}
+      {/* OVERLAY: MODO DISCRETO */}
       {isStealthMode && (
         <div 
           onDoubleClick={() => setIsStealthMode(false)}
@@ -498,8 +477,8 @@ export default function LiveClass() {
         >
           <div className="flex items-center justify-between text-neutral-800 text-xs font-mono">
             <span className="flex items-center gap-2">
-              <span className={`w-2 h-2 rounded-full ${isListening ? 'bg-red-900 animate-ping' : 'bg-neutral-800'}`} />
-              {isListening ? 'GRAVANDO' : 'PAUSADO'}
+              <span className={`w-2 h-2 rounded-full ${isRecording ? 'bg-red-900 animate-ping' : 'bg-neutral-800'}`} />
+              {isRecording ? 'GRAVANDO' : 'PAUSADO'}
             </span>
             <span>{formatTimer(elapsedSeconds)}</span>
           </div>
@@ -532,11 +511,11 @@ export default function LiveClass() {
           </Link>
           <div>
             <h1 className="text-xl font-bold flex items-center gap-2">
-              <span className={`w-3 h-3 rounded-full ${isListening ? 'bg-red-500 animate-ping' : 'bg-emerald-500'}`} />
+              <span className={`w-3 h-3 rounded-full ${isRecording ? 'bg-red-500 animate-ping' : 'bg-emerald-500'}`} />
               Sala de Aula Inteligente
             </h1>
             <p className="text-xs text-slate-400">
-              {activeTab === 'live' ? 'Captura contínua ou manual em sala' : 'Processamento completo de gravação de áudio'}
+              {activeTab === 'live' ? 'Gravação contínua em tempo real' : 'Processamento completo de gravação de áudio'}
             </p>
           </div>
         </div>
@@ -580,7 +559,7 @@ export default function LiveClass() {
             <button
               onClick={() => {
                 setActiveTab('upload');
-                if (isListening) toggleListening();
+                if (isRecording) stopRecording();
               }}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 ${
                 activeTab === 'upload' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
@@ -590,19 +569,24 @@ export default function LiveClass() {
             </button>
           </div>
 
-          {activeTab === 'live' && speechSupported && (
+          {activeTab === 'live' && (
             <>
               <button
-                onClick={toggleListening}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold shadow-lg transition select-none ${
-                  isListening
+                onClick={isRecording ? stopRecording : startRecording}
+                disabled={isProcessingAudio}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold shadow-lg transition select-none disabled:opacity-50 ${
+                  isRecording
                     ? 'bg-red-600 hover:bg-red-500 text-white shadow-red-600/30 animate-pulse'
                     : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/20'
                 }`}
               >
-                {isListening ? (
+                {isRecording ? (
                   <>
-                    <MicOff className="w-4 h-4" /> Parar ({formatTimer(elapsedSeconds)})
+                    <MicOff className="w-4 h-4" /> Parar e Processar ({formatTimer(elapsedSeconds)})
+                  </>
+                ) : isProcessingAudio ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" /> Processando...
                   </>
                 ) : (
                   <>
@@ -613,7 +597,7 @@ export default function LiveClass() {
 
               <button
                 onClick={() => setIsStealthMode(true)}
-                title="Modo Discreto: escurece a tela para economizar bateria e não chamar atenção na aula"
+                title="Modo Discreto: escurece a tela para economizar bateria"
                 className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 px-3 py-2 rounded-xl text-xs transition font-medium"
               >
                 <EyeOff className="w-3.5 h-3.5 text-slate-400" /> Modo Discreto
@@ -690,10 +674,10 @@ export default function LiveClass() {
       ) : (
         /* MODO AO VIVO */
         <>
-          {isListening && interimText && (
-            <div className="bg-indigo-950/40 border border-indigo-500/30 p-3 rounded-xl mb-4 flex items-center gap-3 text-xs text-indigo-200 animate-pulse">
-              <Volume2 className="w-4 h-4 text-indigo-400 shrink-0" />
-              <span className="italic">Ouvindo: &quot;{interimText}&quot;</span>
+          {isRecording && (
+            <div className="bg-red-950/40 border border-red-500/30 p-3 rounded-xl mb-4 flex items-center gap-3 text-xs text-red-200 animate-pulse">
+              <Volume2 className="w-4 h-4 text-red-400 shrink-0" />
+              <span>Gravação ativa em segundo plano ({formatTimer(elapsedSeconds)}). Fale normalmente. Ao terminar, clique em &quot;Parar e Processar&quot;.</span>
             </div>
           )}
 
@@ -732,7 +716,7 @@ export default function LiveClass() {
               <div>
                 <div className="flex items-center justify-between mb-4 border-b border-slate-800/80 pb-3">
                   <h2 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
-                    <BookOpen className="w-4 h-4 text-indigo-400" /> Falas Capturadas (Microfone ou Texto)
+                    <BookOpen className="w-4 h-4 text-indigo-400" /> Falas Capturadas
                   </h2>
                   <span className="text-xs text-slate-500">{transcript.length} falas</span>
                 </div>
@@ -741,7 +725,7 @@ export default function LiveClass() {
                   {transcript.length === 0 ? (
                     <div className="h-48 flex flex-col items-center justify-center text-slate-500 gap-2">
                       <Mic className="w-8 h-8 text-slate-600" />
-                      <p>Fale no microfone ou digite o comando do professor abaixo.</p>
+                      <p>Clique em &quot;Gravar Aula&quot; para registrar o áudio da aula.</p>
                     </div>
                   ) : (
                     transcript.map((line, idx) => (
@@ -759,7 +743,7 @@ export default function LiveClass() {
                   type="text" 
                   value={inputText} 
                   onChange={(e) => setInputText(e.target.value)}
-                  placeholder="Fale no microfone ou digite aqui o que o professor falou..." 
+                  placeholder="Ou digite aqui o que o professor falou..." 
                   disabled={isLoading}
                   className="flex-1 bg-slate-950 border border-slate-700 text-sm text-slate-200 rounded-xl px-4 py-2.5 focus:ring-1 focus:ring-indigo-500 outline-none disabled:opacity-50"
                 />
