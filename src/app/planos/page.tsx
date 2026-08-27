@@ -4,11 +4,23 @@ import React, { useState, useEffect } from 'react';
 import { 
   Check, Sparkles, Zap, Crown, ArrowLeft, 
   ShieldCheck, Presentation, BrainCircuit, Mic, HelpCircle, 
-  ChevronRight, CreditCard, QrCode
+  ChevronRight, CreditCard, QrCode, Lock
 } from 'lucide-react';
 import Link from 'next/link';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import AuthModal from '@/components/AuthModal';
+
+// Configure aqui seus links diretos do Mercado Pago, Stripe ou Asaas
+const CHECKOUT_LINKS = {
+  plus: {
+    monthly: 'https://mpago.la/SEU_LINK_PLUS_MENSAL', // ou link da Stripe / Asaas
+    yearly: 'https://mpago.la/SEU_LINK_PLUS_ANUAL',
+  },
+  pro: {
+    monthly: 'https://mpago.la/SEU_LINK_PRO_MENSAL',
+    yearly: 'https://mpago.la/SEU_LINK_PRO_ANUAL',
+  },
+};
 
 export default function PlansPage() {
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
@@ -22,7 +34,7 @@ export default function PlansPage() {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-          setCurrentUser(data);
+          setCurrentUser(data || { id: user.id, email: user.email, plan: 'free' });
         }
       }
     }
@@ -30,27 +42,42 @@ export default function PlansPage() {
   }, []);
 
   const handleSelectPlan = (planKey: string) => {
+    // 1. Se o usuário não estiver logado, abre modal de login/cadastro primeiro
     if (!currentUser) {
       setSelectedPlanToBuy(planKey);
       setShowAuthModal(true);
       return;
     }
 
+    // 2. Se clicar no plano gratuito
     if (planKey === 'free') {
-      alert('Você já está no plano Gratuito.');
+      if (currentUser?.plan === 'free') {
+        alert('Você já está utilizando o Plano Gratuito!');
+      } else {
+        alert('Sua conta já possui um plano superior ativo.');
+      }
       return;
     }
 
-    // Aqui conectamos ao checkout do Mercado Pago / Stripe / Asaas
-    alert(
-      `Redirecionando para o checkout seguro (${planKey.toUpperCase()} - ${billingCycle === 'yearly' ? 'Anual' : 'Mensal'}). Em breve no ar!`
-    );
+    // 3. Obter link de checkout de acordo com o plano e periodicidade
+    const targetLink = CHECKOUT_LINKS[planKey as keyof typeof CHECKOUT_LINKS]?.[billingCycle];
+
+    if (targetLink && !targetLink.includes('SEU_LINK_')) {
+      // Redireciona para o checkout com identificador do usuário
+      const separator = targetLink.includes('?') ? '&' : '?';
+      window.location.href = `${targetLink}${separator}client_reference_id=${currentUser.id}&customer_email=${encodeURIComponent(currentUser.email || '')}`;
+    } else {
+      // Caso ainda não tenha colado os links reais
+      alert(
+        `Plano ${planKey.toUpperCase()} (${billingCycle === 'yearly' ? 'Anual' : 'Mensal'}) selecionado!\n\nPara ativar o recebimento real, insira seu link de pagamento do Mercado Pago ou Stripe no objeto CHECKOUT_LINKS em src/app/planos/page.tsx.`
+      );
+    }
   };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between p-6 md:p-10">
       
-      {/* Modal de Login se tentar assinar sem estar logado */}
+      {/* Modal de Login / Registro */}
       <AuthModal
         isOpen={showAuthModal}
         onClose={() => setShowAuthModal(false)}
@@ -59,7 +86,7 @@ export default function PlansPage() {
         }}
       />
 
-      {/* Topo */}
+      {/* Topo / Navegação */}
       <header className="max-w-6xl mx-auto w-full flex items-center justify-between pb-8">
         <Link href="/" className="flex items-center gap-2 text-xs text-slate-400 hover:text-white transition">
           <ArrowLeft className="w-4 h-4" /> Voltar ao Início
@@ -72,7 +99,7 @@ export default function PlansPage() {
         </div>
       </header>
 
-      {/* Título & Toggle de Ciclo */}
+      {/* Seção Principal de Preços */}
       <main className="max-w-6xl mx-auto w-full space-y-10 flex-1">
         <div className="text-center space-y-3 max-w-2xl mx-auto">
           <span className="text-xs font-bold uppercase tracking-wider bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-3 py-1 rounded-full inline-block">
@@ -82,17 +109,18 @@ export default function PlansPage() {
             Estude com inteligência, passe na frente.
           </h1>
           <p className="text-xs md:text-sm text-slate-400 leading-relaxed">
-            Economize horas de estudo por semana. Resumos, simulados comentados e slides em PowerPoint prontos em segundos.
+            Economize horas de anotação e revisão por semana. Resumos estruturados, simulados comentados e apresentações em PowerPoint (.pptx) em segundos.
           </p>
 
-          {/* Toggle Mensal / Anual */}
+          {/* Seletor Mensal / Anual */}
           <div className="pt-4 flex items-center justify-center gap-3">
             <span className={`text-xs ${billingCycle === 'monthly' ? 'text-white font-bold' : 'text-slate-500'}`}>
               Mensal
             </span>
             <button
+              type="button"
               onClick={() => setBillingCycle(billingCycle === 'monthly' ? 'yearly' : 'monthly')}
-              className="w-14 h-7 bg-slate-900 border border-slate-700 rounded-full p-1 relative transition flex items-center"
+              className="w-14 h-7 bg-slate-900 border border-slate-700 rounded-full p-1 relative transition flex items-center cursor-pointer"
             >
               <div
                 className={`w-5 h-5 rounded-full bg-indigo-500 transition-transform ${
@@ -101,12 +129,12 @@ export default function PlansPage() {
               />
             </button>
             <span className={`text-xs flex items-center gap-1.5 ${billingCycle === 'yearly' ? 'text-white font-bold' : 'text-slate-500'}`}>
-              Anual <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded-full">Economize 30%</span>
+              Anual <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded-full border border-emerald-500/30">Economize 30%</span>
             </span>
           </div>
         </div>
 
-        {/* Grid de Planos */}
+        {/* Grid dos Planos */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
           
           {/* PLANO 1: GRATUITO */}
@@ -145,7 +173,11 @@ export default function PlansPage() {
 
             <button
               onClick={() => handleSelectPlan('free')}
-              className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold py-3 rounded-xl transition"
+              className={`w-full text-xs font-semibold py-3 rounded-xl transition ${
+                currentUser?.plan === 'free'
+                  ? 'bg-slate-800/50 text-slate-400 border border-slate-700/50 cursor-default'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+              }`}
             >
               {currentUser?.plan === 'free' ? 'Plano Atual' : 'Começar Grátis'}
             </button>
@@ -153,7 +185,7 @@ export default function PlansPage() {
 
           {/* PLANO 2: PLUS UNIVERSITÁRIO (DESTAQUE) */}
           <div className="bg-gradient-to-b from-indigo-950/80 to-slate-900 border-2 border-indigo-500 rounded-3xl p-6 md:p-8 flex flex-col justify-between space-y-6 shadow-2xl relative">
-            <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full shadow-lg">
+            <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest px-3.5 py-1 rounded-full shadow-lg border border-indigo-400/30">
               Mais Escolhido
             </div>
 
@@ -203,9 +235,13 @@ export default function PlansPage() {
 
             <button
               onClick={() => handleSelectPlan('plus')}
-              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-3.5 rounded-xl transition shadow-xl shadow-indigo-600/40 flex items-center justify-center gap-2"
+              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-3.5 rounded-xl transition shadow-xl shadow-indigo-600/40 flex items-center justify-center gap-2 cursor-pointer"
             >
-              <Zap className="w-4 h-4" /> Assinar Plano Plus
+              {currentUser?.plan === 'plus' ? 'Seu Plano Atual' : (
+                <>
+                  <Zap className="w-4 h-4" /> Assinar Plano Plus
+                </>
+              )}
             </button>
           </div>
 
@@ -249,9 +285,13 @@ export default function PlansPage() {
 
             <button
               onClick={() => handleSelectPlan('pro')}
-              className="w-full bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 text-xs font-bold py-3 rounded-xl transition flex items-center justify-center gap-2"
+              className="w-full bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 text-xs font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer"
             >
-              <Crown className="w-4 h-4" /> Assinar Pro Concursos
+              {currentUser?.plan === 'pro' ? 'Seu Plano Atual' : (
+                <>
+                  <Crown className="w-4 h-4" /> Assinar Pro Concursos
+                </>
+              )}
             </button>
           </div>
 
