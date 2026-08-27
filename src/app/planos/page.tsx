@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { 
   Check, Sparkles, Zap, Crown, ArrowLeft, 
-  ShieldCheck, Presentation, BrainCircuit, Mic, 
+  ShieldCheck, Presentation, 
   CreditCard, QrCode, Loader2
 } from 'lucide-react';
 import Link from 'next/link';
@@ -11,7 +11,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import AuthModal from '@/components/AuthModal';
 
-export default function PlansPage() {
+function PlansContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTarget = searchParams.get('redirect') || '/aula';
@@ -41,26 +41,22 @@ export default function PlansPage() {
   }, []);
 
   const handleSelectPlan = async (planKey: string) => {
-    // 1. Se não estiver logado, abre modal de login
     if (!currentUser) {
       setSelectedPlanToBuy(planKey);
       setShowAuthModal(true);
       return;
     }
 
-    // 2. Se for o plano gratuito e o usuário já está logado
     if (planKey === 'free') {
       router.push(redirectTarget);
       return;
     }
 
-    // 3. Se já for assinante desse mesmo plano
     if (currentUser?.plan === planKey) {
       router.push(redirectTarget);
       return;
     }
 
-    // 4. Inicia checkout no Mercado Pago
     try {
       setLoadingPlan(planKey);
       const res = await fetch('/api/checkout', {
@@ -94,22 +90,18 @@ export default function PlansPage() {
     if (selectedPlanToBuy === 'free' || !selectedPlanToBuy) {
       router.push(redirectTarget);
     } else {
-      // Se ele clicou em Plus/Pro antes de logar, recarrega para pegar a sessão e ir pro checkout
       window.location.reload();
     }
   };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between p-6 md:p-10">
-      
-      {/* Modal de Autenticação */}
       <AuthModal
         isOpen={showAuthModal}
         onClose={() => setShowAuthModal(false)}
         onSuccess={handleAuthSuccess}
       />
 
-      {/* Topo */}
       <header className="max-w-6xl mx-auto w-full flex items-center justify-between pb-8">
         <Link href="/" className="flex items-center gap-2 text-xs text-slate-400 hover:text-white transition">
           <ArrowLeft className="w-4 h-4" /> Voltar ao Início
@@ -122,7 +114,6 @@ export default function PlansPage() {
         </div>
       </header>
 
-      {/* Preços */}
       <main className="max-w-6xl mx-auto w-full space-y-10 flex-1">
         <div className="text-center space-y-3 max-w-2xl mx-auto">
           <span className="text-xs font-bold uppercase tracking-wider bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-3 py-1 rounded-full inline-block">
@@ -135,7 +126,6 @@ export default function PlansPage() {
             Economize horas de anotação e revisão por semana. Resumos estruturados, simulados comentados e apresentações em PowerPoint (.pptx) em segundos.
           </p>
 
-          {/* Seletor Mensal / Anual */}
           <div className="pt-4 flex items-center justify-center gap-3">
             <span className={`text-xs ${billingCycle === 'monthly' ? 'text-white font-bold' : 'text-slate-500'}`}>
               Mensal
@@ -157,7 +147,6 @@ export default function PlansPage() {
           </div>
         </div>
 
-        {/* Cards de Preços */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
           
           {/* GRATUITO */}
@@ -330,7 +319,6 @@ export default function PlansPage() {
 
         </div>
 
-        {/* Garantia */}
         <div className="max-w-3xl mx-auto bg-slate-900/40 border border-slate-800 rounded-2xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-400">
           <div className="flex items-center gap-3">
             <ShieldCheck className="w-6 h-6 text-emerald-400 shrink-0" />
@@ -347,10 +335,17 @@ export default function PlansPage() {
         </div>
       </main>
 
-      {/* Footer */}
       <footer className="max-w-6xl mx-auto w-full pt-8 text-center text-xs text-slate-500 border-t border-slate-800/80">
         NOTAÍ • Pagamentos processados com segurança pelo Mercado Pago.
       </footer>
     </div>
+  );
+}
+
+export default function PlansPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400 text-xs">Carregando planos...</div>}>
+      <PlansContent />
+    </Suspense>
   );
 }
