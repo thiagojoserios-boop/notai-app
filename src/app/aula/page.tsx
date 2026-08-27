@@ -3,9 +3,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Sparkles, BookOpen, AlertTriangle, ArrowLeft, 
-  CheckCircle, BrainCircuit, X, Download, Share2, Layers, HelpCircle, Send, PlayCircle, Loader2,
-  Table as TableIcon, FileText, Check, Mic, MicOff, Volume2, Printer, UploadCloud, Music, FileAudio,
-  EyeOff, User, LogOut, Zap
+  CheckCircle, BrainCircuit, X, Share2, Layers, HelpCircle, Send, PlayCircle, Loader2,
+  Table as TableIcon, FileText, Check, Mic, MicOff, Volume2, UploadCloud, Music, FileAudio,
+  EyeOff, User, LogOut
 } from 'lucide-react';
 import Link from 'next/link';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
@@ -75,6 +75,13 @@ export default function LiveClass() {
   const [interimText, setInterimText] = useState('');
   const [speechSupported, setSpeechSupported] = useState(true);
   const recognitionRef = useRef<any>(null);
+  const isListeningRef = useRef<boolean>(false);
+  const userProfileRef = useRef<UserProfile | null>(null);
+
+  // Atualizar ref do perfil para evitar recriação do SpeechRecognition
+  useEffect(() => {
+    userProfileRef.current = userProfile;
+  }, [userProfile]);
 
   // Estados de Upload de Arquivo
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -141,7 +148,7 @@ export default function LiveClass() {
     return () => clearInterval(timer);
   }, [isListening]);
 
-  // Reconhecimento de Voz
+  // Reconhecimento de Voz (Executa uma única vez no mount)
   useEffect(() => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -175,13 +182,14 @@ export default function LiveClass() {
     recognition.onerror = (event: any) => {
       console.warn('Evento de áudio:', event.error);
       if (event.error === 'not-allowed') {
+        isListeningRef.current = false;
         setIsListening(false);
         alert('Permissão de microfone negada. Autorize no navegador.');
       }
     };
 
     recognition.onend = () => {
-      if (recognitionRef.current?.shouldKeepListening) {
+      if (isListeningRef.current) {
         try {
           recognition.start();
         } catch (e) {}
@@ -193,25 +201,28 @@ export default function LiveClass() {
     recognitionRef.current = recognition;
 
     return () => {
+      isListeningRef.current = false;
       if (recognitionRef.current) {
-        recognitionRef.current.shouldKeepListening = false;
-        recognitionRef.current.stop();
+        try {
+          recognitionRef.current.stop();
+        } catch (e) {}
       }
     };
-  }, [userProfile]);
+  }, []);
 
   const checkQuotaAndProceed = (): boolean => {
-    if (!userProfile) {
+    const profile = userProfileRef.current;
+    if (!profile) {
       setShowAuthModal(true);
       return false;
     }
 
     if (
-      userProfile.plan === 'free' &&
-      userProfile.classes_used_this_month >= userProfile.max_classes_month
+      profile.plan === 'free' &&
+      profile.classes_used_this_month >= profile.max_classes_month
     ) {
       setUpgradeReason(
-        `Você atingiu o limite de ${userProfile.max_classes_month} aulas gratuitas deste mês no plano Free.`
+        `Você atingiu o limite de ${profile.max_classes_month} aulas gratuitas deste mês no plano Free.`
       );
       setShowUpgradeModal(true);
       return false;
@@ -221,16 +232,17 @@ export default function LiveClass() {
   };
 
   const incrementClassUsage = async () => {
-    if (!userProfile || !isSupabaseConfigured || !supabase) return;
+    const profile = userProfileRef.current;
+    if (!profile || !isSupabaseConfigured || !supabase) return;
     try {
-      const nextCount = userProfile.classes_used_this_month + 1;
+      const nextCount = profile.classes_used_this_month + 1;
       await supabase
         .from('profiles')
         .update({ classes_used_this_month: nextCount })
-        .eq('id', userProfile.id);
+        .eq('id', profile.id);
 
       setUserProfile({
-        ...userProfile,
+        ...profile,
         classes_used_this_month: nextCount,
       });
     } catch (err) {
@@ -242,7 +254,7 @@ export default function LiveClass() {
     if (!recognitionRef.current) return;
 
     if (isListening) {
-      recognitionRef.current.shouldKeepListening = false;
+      isListeningRef.current = false;
       recognitionRef.current.stop();
       setIsListening(false);
       setInterimText('');
@@ -250,7 +262,7 @@ export default function LiveClass() {
       if (!checkQuotaAndProceed()) return;
 
       try {
-        recognitionRef.current.shouldKeepListening = true;
+        isListeningRef.current = true;
         recognitionRef.current.start();
         setIsListening(true);
         if (transcript.length === 0) {
@@ -307,7 +319,6 @@ export default function LiveClass() {
 
     if (!checkQuotaAndProceed()) return;
 
-    // Trava de tamanho/duração do Plano Free (aprox 25MB para 15 min)
     if (userProfile?.plan === 'free' && selectedFile.size > 25 * 1024 * 1024) {
       setUpgradeReason(
         'Arquivos de áudio maiores que 15 minutos são exclusivos dos planos Plus e Pro.'
@@ -745,8 +756,8 @@ export default function LiveClass() {
 
               <form onSubmit={handleSimulateSubmit} className="pt-3 border-t border-slate-800 flex gap-2">
                 <input 
-                  type="text"
-                  value={inputText}
+                  type="text" 
+                  value={inputText} 
                   onChange={(e) => setInputText(e.target.value)}
                   placeholder="Fale no microfone ou digite aqui o que o professor falou..." 
                   disabled={isLoading}
@@ -822,7 +833,7 @@ export default function LiveClass() {
                   <div className="relative">
                     <input 
                       type="text" 
-                      value={quickQuestion}
+                      value={quickQuestion} 
                       onChange={(e) => setQuickQuestion(e.target.value)}
                       placeholder="Ex: O que ele mandou fazer?" 
                       className="w-full bg-slate-950 border border-slate-700 text-xs text-slate-200 rounded-xl p-3 pr-8 focus:ring-1 focus:ring-indigo-500 outline-none"
