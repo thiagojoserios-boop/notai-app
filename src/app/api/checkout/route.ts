@@ -40,6 +40,12 @@ export async function POST(request: Request) {
         payer: {
           email: userEmail || undefined,
         },
+        payment_methods: {
+          excluded_payment_types: [
+            { id: 'ticket' } // Remove Boleto Bancário
+          ],
+          installments: 12,
+        },
         external_reference: JSON.stringify({ userId, planKey }),
         back_urls: {
           success: `${origin}/aula?upgrade=success`,
