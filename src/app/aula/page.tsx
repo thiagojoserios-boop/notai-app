@@ -5,10 +5,12 @@ import {
   Sparkles, BookOpen, AlertTriangle, ArrowLeft, 
   CheckCircle, BrainCircuit, X, Download, Share2, Layers, HelpCircle, Send, PlayCircle, Loader2,
   Table as TableIcon, FileText, Check, Mic, MicOff, Volume2, Printer, UploadCloud, Music, FileAudio,
-  EyeOff, Lock, Unlock, Clock
+  EyeOff, User, LogOut, Zap
 } from 'lucide-react';
 import Link from 'next/link';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import AuthModal from '@/components/AuthModal';
+import UpgradeModal from '@/components/UpgradeModal';
 
 interface MindMapNode {
   category: string;
@@ -34,6 +36,16 @@ interface ActivityDetected {
   summary?: SummarySection[];
 }
 
+interface UserProfile {
+  id: string;
+  email: string;
+  full_name?: string;
+  plan: 'free' | 'plus' | 'pro';
+  classes_used_this_month: number;
+  max_classes_month: number;
+  max_audio_minutes: number;
+}
+
 export default function LiveClass() {
   const [activeTab, setActiveTab] = useState<'live' | 'upload'>('live');
   const [transcript, setTranscript] = useState<string[]>([]);
@@ -46,6 +58,12 @@ export default function LiveClass() {
   const [quickQuestion, setQuickQuestion] = useState('');
   const [quickAnswer, setQuickAnswer] = useState<string | null>(null);
   const [savedSuccess, setSavedSuccess] = useState(false);
+
+  // Modais de Auth e Upgrade
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [upgradeReason, setUpgradeReason] = useState<string>('');
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
 
   // Modo Discreto / Tela Oculta
   const [isStealthMode, setIsStealthMode] = useState(false);
@@ -63,7 +81,43 @@ export default function LiveClass() {
   const [uploadLoading, setUploadLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Atualização do Relógio do Modo Discreto
+  // Carregar Perfil do Usuário
+  const loadUserProfile = async () => {
+    if (!isSupabaseConfigured || !supabase) return;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .single();
+
+        if (data && !error) {
+          setUserProfile(data as UserProfile);
+        }
+      } else {
+        setUserProfile(null);
+      }
+    } catch (err) {
+      console.warn('Erro ao carregar perfil do usuário:', err);
+    }
+  };
+
+  useEffect(() => {
+    loadUserProfile();
+
+    if (isSupabaseConfigured && supabase) {
+      const { data: authListener } = supabase.auth.onAuthStateChange(() => {
+        loadUserProfile();
+      });
+      return () => {
+        authListener.subscription.unsubscribe();
+      };
+    }
+  }, []);
+
+  // Relógio do Modo Discreto
   useEffect(() => {
     const updateClock = () => {
       const now = new Date();
@@ -74,7 +128,7 @@ export default function LiveClass() {
     return () => clearInterval(interval);
   }, []);
 
-  // Cronômetro de Gravação
+  // Cronômetro
   useEffect(() => {
     let timer: any;
     if (isListening) {
@@ -87,6 +141,7 @@ export default function LiveClass() {
     return () => clearInterval(timer);
   }, [isListening]);
 
+  // Reconhecimento de Voz
   useEffect(() => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -143,7 +198,45 @@ export default function LiveClass() {
         recognitionRef.current.stop();
       }
     };
-  }, []);
+  }, [userProfile]);
+
+  const checkQuotaAndProceed = (): boolean => {
+    if (!userProfile) {
+      setShowAuthModal(true);
+      return false;
+    }
+
+    if (
+      userProfile.plan === 'free' &&
+      userProfile.classes_used_this_month >= userProfile.max_classes_month
+    ) {
+      setUpgradeReason(
+        `Você atingiu o limite de ${userProfile.max_classes_month} aulas gratuitas deste mês no plano Free.`
+      );
+      setShowUpgradeModal(true);
+      return false;
+    }
+
+    return true;
+  };
+
+  const incrementClassUsage = async () => {
+    if (!userProfile || !isSupabaseConfigured || !supabase) return;
+    try {
+      const nextCount = userProfile.classes_used_this_month + 1;
+      await supabase
+        .from('profiles')
+        .update({ classes_used_this_month: nextCount })
+        .eq('id', userProfile.id);
+
+      setUserProfile({
+        ...userProfile,
+        classes_used_this_month: nextCount,
+      });
+    } catch (err) {
+      console.warn('Erro ao atualizar contagem de aula:', err);
+    }
+  };
 
   const toggleListening = () => {
     if (!recognitionRef.current) return;
@@ -154,10 +247,15 @@ export default function LiveClass() {
       setIsListening(false);
       setInterimText('');
     } else {
+      if (!checkQuotaAndProceed()) return;
+
       try {
         recognitionRef.current.shouldKeepListening = true;
         recognitionRef.current.start();
         setIsListening(true);
+        if (transcript.length === 0) {
+          incrementClassUsage();
+        }
       } catch (err) {
         console.error('Erro ao iniciar microfone:', err);
       }
@@ -207,6 +305,17 @@ export default function LiveClass() {
     e.preventDefault();
     if (!selectedFile || uploadLoading) return;
 
+    if (!checkQuotaAndProceed()) return;
+
+    // Trava de tamanho/duração do Plano Free (aprox 25MB para 15 min)
+    if (userProfile?.plan === 'free' && selectedFile.size > 25 * 1024 * 1024) {
+      setUpgradeReason(
+        'Arquivos de áudio maiores que 15 minutos são exclusivos dos planos Plus e Pro.'
+      );
+      setShowUpgradeModal(true);
+      return;
+    }
+
     setUploadLoading(true);
     const formData = new FormData();
     formData.append('audio', selectedFile);
@@ -241,6 +350,8 @@ export default function LiveClass() {
       } else {
         alert('Áudio processado com sucesso!');
       }
+
+      incrementClassUsage();
     } catch (err: any) {
       console.error('Erro ao enviar áudio:', err);
       alert(`Aviso: ${err.message || 'Falha ao processar arquivo de áudio.'}`);
@@ -253,12 +364,18 @@ export default function LiveClass() {
   const handleSimulateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim() || isLoading) return;
+    if (transcript.length === 0 && !checkQuotaAndProceed()) return;
+
+    if (transcript.length === 0) incrementClassUsage();
     processWithAI(inputText);
     setInputText('');
   };
 
   const simulatePhrase = (phrase: string) => {
     if (isLoading) return;
+    if (transcript.length === 0 && !checkQuotaAndProceed()) return;
+
+    if (transcript.length === 0) incrementClassUsage();
     processWithAI(phrase);
   };
 
@@ -308,10 +425,11 @@ export default function LiveClass() {
         activityData: detectedActivity,
       };
 
-      if (isSupabaseConfigured && supabase) {
+      if (isSupabaseConfigured && supabase && userProfile) {
         await supabase.from('notes').insert([
           {
             id: newNote.id,
+            user_id: userProfile.id,
             subject: newNote.subject,
             title: newNote.title,
             date: newNote.date,
@@ -337,155 +455,36 @@ export default function LiveClass() {
     }
   };
 
-  const handleExportFile = () => {
-    if (!detectedActivity) return;
-
-    let content = `# NOTAÍ - ${detectedActivity.topic}\n\n`;
-    content += `**Disciplina:** ${detectedSubject}\n`;
-    content += `**Tipo:** ${detectedActivity.type}\n`;
-    content += `**Data:** ${new Date().toLocaleDateString('pt-BR')}\n\n`;
-    
-    if (detectedActivity.requirements && Array.isArray(detectedActivity.requirements)) {
-      content += `## Requisitos Identificados:\n${detectedActivity.requirements.map((r) => `- ${r}`).join('\n')}\n\n`;
+  const handleLogout = async () => {
+    if (isSupabaseConfigured && supabase) {
+      await supabase.auth.signOut();
+      setUserProfile(null);
     }
-
-    if (detectedActivity.type === 'Mapa Mental' && detectedActivity.nodes) {
-      content += `## Estrutura do Mapa Mental:\n\n`;
-      detectedActivity.nodes.forEach((n) => {
-        content += `### ${n.category}\n`;
-        n.items?.forEach((it) => { content += `- ${it}\n`; });
-        content += '\n';
-      });
-    } else if (detectedActivity.type === 'Tabela Comparativa' && detectedActivity.table) {
-      content += `## Tabela Comparativa:\n\n`;
-      content += `| ${detectedActivity.table.headers.join(' | ')} |\n`;
-      content += `| ${detectedActivity.table.headers.map(() => '---').join(' | ')} |\n`;
-      detectedActivity.table.rows.forEach((r) => {
-        content += `| ${r.join(' | ')} |\n`;
-      });
-    } else if (detectedActivity.type === 'Resumo Estruturado' && detectedActivity.summary) {
-      content += `## Resumo Estruturado:\n\n`;
-      detectedActivity.summary.forEach((s) => {
-        content += `### ${s.section}\n${s.content}\n\n`;
-      });
-    }
-
-    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `${(detectedActivity.topic || 'anotacao').replace(/\s+/g, '_')}_notai.md`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const handlePrintPDF = () => {
-    if (!detectedActivity) return;
-
-    let bodyHTML = '';
-
-    if (detectedActivity.type === 'Mapa Mental' && detectedActivity.nodes) {
-      bodyHTML = `
-        <div style="display: flex; justify-content: center; margin: 20px 0;">
-          <div style="background: #4f46e5; color: white; padding: 12px 24px; border-radius: 8px; font-weight: bold; font-size: 16px;">
-            🧠 ${detectedActivity.topic}
-          </div>
-        </div>
-        <div style="grid-template-columns: repeat(2, 1fr); display: grid; gap: 16px; margin-top: 20px;">
-          ${detectedActivity.nodes.map((n) => `
-            <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 16px;">
-              <h4 style="color: #4f46e5; margin: 0 0 10px 0; text-transform: uppercase; font-size: 13px; font-weight: bold;">${n.category}</h4>
-              <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: #334155; line-height: 1.6;">
-                ${n.items?.map((it) => `<li>${it}</li>`).join('')}
-              </ul>
-            </div>
-          `).join('')}
-        </div>
-      `;
-    } else if (detectedActivity.type === 'Tabela Comparativa' && detectedActivity.table) {
-      bodyHTML = `
-        <table style="width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 13px;">
-          <thead>
-            <tr style="background: #f1f5f9; border-bottom: 2px solid #cbd5e1; color: #0f172a;">
-              ${detectedActivity.table.headers.map((h) => `<th style="padding: 12px; text-align: left; font-weight: bold;">${h}</th>`).join('')}
-            </tr>
-          </thead>
-          <tbody>
-            ${detectedActivity.table.rows.map((row) => `
-              <tr style="border-bottom: 1px solid #e2e8f0;">
-                ${row.map((cell, idx) => `<td style="padding: 12px; color: #334155; ${idx === 0 ? 'font-weight: bold; color: #0f172a;' : ''}">${cell}</td>`).join('')}
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      `;
-    } else if (detectedActivity.type === 'Resumo Estruturado' && detectedActivity.summary) {
-      bodyHTML = `
-        <div style="margin-top: 20px; display: flex; flex-direction: column; gap: 16px;">
-          ${detectedActivity.summary.map((s) => `
-            <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 16px;">
-              <h3 style="color: #2563eb; margin: 0 0 8px 0; font-size: 14px; font-weight: bold;">${s.section}</h3>
-              <p style="margin: 0; color: #334155; font-size: 13px; line-height: 1.6;">${s.content}</p>
-            </div>
-          `).join('')}
-        </div>
-      `;
-    }
-
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>${detectedActivity.topic} - NOTAÍ</title>
-          <style>
-            @page { size: A4; margin: 20mm; }
-            body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif; color: #0f172a; margin: 0; padding: 0; }
-            .header { border-bottom: 2px solid #4f46e5; padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-end; }
-            .title { font-size: 22px; font-weight: bold; color: #0f172a; margin: 0; }
-            .meta { font-size: 12px; color: #64748b; margin-top: 6px; }
-            .badge { background: #e0e7ff; color: #4338ca; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; display: inline-block; }
-            .footer { margin-top: 40px; border-top: 1px solid #e2e8f0; padding-top: 12px; text-align: center; font-size: 11px; color: #94a3b8; }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <div>
-              <div style="font-size: 12px; font-weight: bold; color: #4f46e5; letter-spacing: 1px; margin-bottom: 4px;">NOTAÍ • IA EDUCACIONAL</div>
-              <h1 class="title">${detectedActivity.topic}</h1>
-              <div class="meta">Disciplina: <strong>${detectedSubject}</strong> | Data: ${new Date().toLocaleDateString('pt-BR')}</div>
-            </div>
-            <div class="badge">${detectedActivity.type}</div>
-          </div>
-          ${bodyHTML}
-          <div class="footer">
-            Gerado automaticamente por NOTAÍ - Inteligência Artificial para Sala de Aula
-          </div>
-          <script>
-            window.onload = function() {
-              window.print();
-              setTimeout(() => { window.close(); }, 500);
-            }
-          </script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
   };
 
   return (
     <div className="flex flex-col min-h-screen bg-slate-950 text-slate-100 p-6 md:p-8">
       
-      {/* OVERLAY: MODO DISCRETO / TELA APAGADA (OLED PURA) */}
+      {/* MODAL DE AUTENTICAÇÃO */}
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        onSuccess={() => loadUserProfile()}
+      />
+
+      {/* MODAL DE UPGRADE / COTAS */}
+      <UpgradeModal
+        isOpen={showUpgradeModal}
+        onClose={() => setShowUpgradeModal(false)}
+        reason={upgradeReason}
+      />
+
+      {/* OVERLAY: MODO DISCRETO (OLED PURA) */}
       {isStealthMode && (
         <div 
           onDoubleClick={() => setIsStealthMode(false)}
           className="fixed inset-0 z-[999] bg-black flex flex-col justify-between p-8 select-none cursor-pointer"
         >
-          {/* Topo do Modo Discreto */}
           <div className="flex items-center justify-between text-neutral-800 text-xs font-mono">
             <span className="flex items-center gap-2">
               <span className={`w-2 h-2 rounded-full ${isListening ? 'bg-red-900 animate-ping' : 'bg-neutral-800'}`} />
@@ -494,7 +493,6 @@ export default function LiveClass() {
             <span>{formatTimer(elapsedSeconds)}</span>
           </div>
 
-          {/* Centro Minimalista: Apenas relógio e indicação sutil */}
           <div className="text-center space-y-3">
             <h1 className="text-4xl md:text-6xl font-light text-neutral-800 font-mono tracking-widest">
               {currentTime}
@@ -504,7 +502,6 @@ export default function LiveClass() {
             </p>
           </div>
 
-          {/* Rodapé: Instrução para sair */}
           <div className="text-center">
             <button
               onClick={() => setIsStealthMode(false)}
@@ -533,8 +530,33 @@ export default function LiveClass() {
           </div>
         </div>
 
-        {/* Alternador de Modo e Ações */}
-        <div className="flex items-center gap-3">
+        {/* Status de Cota do Usuário e Alternador */}
+        <div className="flex flex-wrap items-center gap-3">
+          {userProfile ? (
+            <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl text-xs">
+              <div className="flex flex-col text-right">
+                <span className="font-semibold text-slate-200 truncate max-w-[120px]">{userProfile.email}</span>
+                <span className="text-[10px] text-indigo-400">
+                  {userProfile.plan.toUpperCase()} • {userProfile.classes_used_this_month}/{userProfile.max_classes_month} aulas
+                </span>
+              </div>
+              <button 
+                onClick={handleLogout}
+                title="Sair"
+                className="p-1 hover:text-rose-400 text-slate-500 transition"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowAuthModal(true)}
+              className="text-xs bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-xl transition flex items-center gap-1.5"
+            >
+              <User className="w-3.5 h-3.5 text-indigo-400" /> Entrar / Cadastrar
+            </button>
+          )}
+
           <div className="bg-slate-900 border border-slate-800 p-1 rounded-xl flex items-center gap-1">
             <button
               onClick={() => setActiveTab('live')}
@@ -578,7 +600,6 @@ export default function LiveClass() {
                 )}
               </button>
 
-              {/* Botão de Ativação do Modo Discreto */}
               <button
                 onClick={() => setIsStealthMode(true)}
                 title="Modo Discreto: escurece a tela para economizar bateria e não chamar atenção na aula"
@@ -595,16 +616,10 @@ export default function LiveClass() {
           >
             <BookOpen className="w-3.5 h-3.5 text-indigo-400" /> Ver Anotações
           </Link>
-
-          {(isLoading || uploadLoading) && (
-            <span className="text-xs text-indigo-400 flex items-center gap-1.5 animate-pulse bg-indigo-500/10 px-3 py-1.5 rounded-xl border border-indigo-500/20">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Processando com IA...
-            </span>
-          )}
         </div>
       </header>
 
-      {/* ÁREA DE UPLOAD DE ARQUIVO */}
+      {/* ÁREA DE UPLOAD */}
       {activeTab === 'upload' ? (
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 max-w-2xl mx-auto w-full space-y-6 text-center my-auto shadow-2xl">
           <div className="w-16 h-16 rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center mx-auto">
@@ -614,7 +629,7 @@ export default function LiveClass() {
           <div className="space-y-2">
             <h2 className="text-xl font-bold text-white">Carregar Gravação de Aula</h2>
             <p className="text-xs text-slate-400 max-w-md mx-auto">
-              Envie arquivos nos formatos <strong>MP3, M4A, WAV ou AAC</strong> gravados pelo celular. A IA estruturará a aula e os mapas mentais.
+              Envie arquivos em <strong>MP3, M4A, WAV ou AAC</strong> gravados pelo celular. A IA identificará o conteúdo e criará mapas mentais.
             </p>
           </div>
 
@@ -941,18 +956,6 @@ export default function LiveClass() {
             <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
               <span className="text-xs text-slate-400">Atividade pronta para estudo ou entrega</span>
               <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
-                <button 
-                  onClick={handlePrintPDF}
-                  className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white text-xs font-semibold px-3.5 py-2.5 rounded-xl border border-rose-500/30 transition shadow-md"
-                >
-                  <Printer className="w-3.5 h-3.5" /> Gerar PDF
-                </button>
-                <button 
-                  onClick={handleExportFile}
-                  className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3.5 py-2.5 rounded-xl border border-slate-700 transition"
-                >
-                  <Download className="w-3.5 h-3.5" /> Markdown (.md)
-                </button>
                 <button 
                   onClick={handleSaveToNotes}
                   className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-lg transition ${

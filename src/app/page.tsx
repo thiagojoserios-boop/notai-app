@@ -1,257 +1,289 @@
 'use client';
 
-
-import { useAuth } from '@/context/AuthContext';
 import React, { useState, useEffect } from 'react';
-import Link from 'next/link';
 import { 
-  Mic, BookOpen, BrainCircuit, Sparkles, Award, 
-  ArrowRight, ShieldCheck, Flame, Clock, 
-  ChevronRight, FileText, Table as TableIcon, Layers, Play
+  Sparkles, Mic, BookOpen, BrainCircuit, Award, 
+  Presentation, EyeOff, ArrowRight, CheckCircle, 
+  FileText, Table as TableIcon, Layers, Zap, Download
 } from 'lucide-react';
+import Link from 'next/link';
+import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 
-interface NoteItem {
+interface Note {
   id: string;
   subject: string;
   title: string;
   date: string;
   type: string;
   tag: string;
+  description: string;
 }
 
 export default function HomePage() {
-  const [totalNotes, setTotalNotes] = useState(2);
-  const [recentNotes, setRecentNotes] = useState<NoteItem[]>([]);
+  const [recentNotes, setRecentNotes] = useState<Note[]>([]);
+  const [totalNotes, setTotalNotes] = useState(0);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('notai_notes');
-      if (saved) {
+    async function loadStats() {
+      if (isSupabaseConfigured && supabase) {
         try {
-          const parsed = JSON.parse(saved);
-          setTotalNotes(parsed.length + 2); // Somando as anotações padrão
-          setRecentNotes(parsed.slice(0, 3));
-        } catch (e) {
-          console.error(e);
+          const { data, error } = await supabase
+            .from('notes')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(4);
+
+          if (!error && data) {
+            setRecentNotes(
+              data.map((d: any) => ({
+                id: d.id,
+                subject: d.subject,
+                title: d.title,
+                date: d.date,
+                type: d.type,
+                tag: d.tag,
+                description: d.description,
+              }))
+            );
+            setTotalNotes(data.length);
+            return;
+          }
+        } catch (e) {}
+      }
+
+      if (typeof window !== 'undefined') {
+        const raw = localStorage.getItem('notai_notes');
+        if (raw) {
+          try {
+            const parsed = JSON.parse(raw);
+            setRecentNotes(parsed.slice(0, 4));
+            setTotalNotes(parsed.length);
+          } catch (e) {}
         }
       }
     }
+
+    loadStats();
   }, []);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-indigo-500 selection:text-white">
-      
-      {/* Topo / Navbar */}
-      <header className="border-b border-slate-800/80 bg-slate-950/60 backdrop-blur-md sticky top-0 z-40">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between">
+      {/* NAVBAR */}
+      <header className="border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
-              <BrainCircuit className="w-5 h-5 text-white" />
+          <Link href="/" className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-600/30">
+              <Sparkles className="w-5 h-5 text-white" />
             </div>
             <div>
-              <span className="font-extrabold text-lg tracking-tight bg-gradient-to-r from-white via-slate-200 to-indigo-300 bg-clip-text text-transparent">
+              <span className="font-black text-lg tracking-tight bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">
                 NOTAÍ
               </span>
-              <span className="text-[10px] text-indigo-400 font-semibold uppercase tracking-wider block -mt-1">
+              <span className="text-[9px] uppercase tracking-widest text-indigo-400 block -mt-1 font-semibold">
                 IA Educacional
               </span>
             </div>
-          </div>
+          </Link>
 
           <div className="flex items-center gap-3">
-            <Link 
+            <Link
               href="/anotacoes"
-              className="text-xs font-semibold text-slate-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-slate-800 px-4 py-2 rounded-xl transition"
+              className="text-xs font-medium text-slate-300 hover:text-white px-3.5 py-2 rounded-xl hover:bg-slate-900 transition flex items-center gap-1.5"
             >
-              Minhas Anotações
+              <BookOpen className="w-4 h-4 text-indigo-400" /> Minhas Anotações
             </Link>
-            <Link 
+
+            <Link
               href="/aula"
-              className="text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-xl shadow-lg shadow-indigo-600/20 transition flex items-center gap-1.5"
+              className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow-lg shadow-indigo-600/20"
             >
-              <Mic className="w-3.5 h-3.5" /> Entrar na Aula
+              <Mic className="w-4 h-4" /> Entrar na Aula
             </Link>
           </div>
         </div>
       </header>
 
-      {/* Hero Section Principal */}
-      <main className="flex-1 max-w-7xl mx-auto px-6 py-10 w-full space-y-12">
-        
-        {/* Banner de Boas-Vindas */}
-        <section className="relative overflow-hidden rounded-3xl bg-gradient-to-b from-indigo-950/40 via-slate-900/60 to-slate-900 border border-indigo-500/20 p-8 md:p-12 shadow-2xl">
-          <div className="absolute -right-20 -top-20 w-80 h-80 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute -left-20 -bottom-20 w-80 h-80 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
-
+      {/* HERO SECTION */}
+      <main className="max-w-7xl mx-auto px-6 py-10 space-y-12 flex-1 w-full">
+        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-950/40 via-slate-900 to-slate-950 border border-slate-800 p-8 md:p-12">
+          <div className="absolute top-0 right-0 -mt-12 -mr-12 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+          
           <div className="max-w-3xl space-y-6 relative z-10">
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-xs font-medium text-indigo-300">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Inteligência Contextual em Sala de Aula</span>
+            <div className="inline-flex items-center gap-2 bg-indigo-500/10 border border-indigo-500/20 px-3 py-1 rounded-full text-xs font-semibold text-indigo-300">
+              <Sparkles className="w-3.5 h-3.5" /> Inteligência Contextual em Sala de Aula
             </div>
 
-            <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight leading-tight text-white">
+            <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight text-white leading-tight">
               Nunca mais perca o que o professor pediu na aula.
             </h1>
 
-            <p className="text-sm sm:text-base text-slate-400 leading-relaxed max-w-2xl">
-              O NOTAÍ escuta sua aula ao vivo, detecta comandos de trabalhos, gera mapas mentais, resumos estruturados e prepara flashcards e simulados instantâneos para você estudar.
+            <p className="text-sm md:text-base text-slate-300 leading-relaxed max-w-2xl">
+              O NOTAÍ escuta sua aula ao vivo (ou gravações de áudio), detecta comandos de trabalhos, gera mapas mentais, resumos estruturados, simulados comentados e <strong>apresentações de slides em PowerPoint (.pptx)</strong> prontas com roteiro de fala.
             </p>
 
-            {/* Ações Rápidas em Destaque */}
-            <div className="flex flex-wrap gap-4 pt-2">
-              <Link 
+            <div className="flex flex-wrap items-center gap-3 pt-2">
+              <Link
                 href="/aula"
-                className="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-6 py-3.5 rounded-2xl shadow-xl shadow-indigo-600/30 transition flex items-center gap-2.5 text-sm group"
+                className="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-6 py-3 rounded-xl text-xs transition flex items-center gap-2 shadow-xl shadow-indigo-600/30"
               >
-                <Mic className="w-4 h-4 text-indigo-200 group-hover:scale-110 transition" />
-                <span>Gravar Aula ao Vivo</span>
-                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition" />
+                <Mic className="w-4 h-4" /> Gravar Aula ao Vivo <ArrowRight className="w-4 h-4" />
               </Link>
 
-              <Link 
+              <Link
                 href="/anotacoes"
-                className="bg-slate-900 hover:bg-slate-800 text-slate-200 font-semibold px-6 py-3.5 rounded-2xl border border-slate-700 transition flex items-center gap-2.5 text-sm"
+                className="bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 font-medium px-5 py-3 rounded-xl text-xs transition flex items-center gap-2"
               >
-                <BookOpen className="w-4 h-4 text-slate-400" />
-                <span>Acessar Caderno Digital</span>
+                <BookOpen className="w-4 h-4 text-indigo-400" /> Acessar Caderno Digital
               </Link>
             </div>
           </div>
-        </section>
+        </div>
 
-        {/* Métricas e Indicadores de Desempenho */}
-        <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl space-y-2">
-            <div className="flex items-center justify-between text-slate-400">
-              <span className="text-xs font-medium">Anotações Salvas</span>
-              <BookOpen className="w-4 h-4 text-indigo-400" />
-            </div>
-            <div className="text-2xl font-bold text-white">{totalNotes}</div>
-            <p className="text-[11px] text-slate-500">Cadernos sincronizados</p>
+        {/* MÉTRICAS / DESTAQUES RÁPIDOS */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-2xl">
+            <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5 mb-1">
+              <BookOpen className="w-3.5 h-3.5 text-indigo-400" /> Anotações Salvas
+            </span>
+            <p className="text-2xl font-black text-white">{totalNotes}</p>
+            <span className="text-[11px] text-slate-500 mt-1 block">Cadernos sincronizados</span>
           </div>
 
-          <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl space-y-2">
-            <div className="flex items-center justify-between text-slate-400">
-              <span className="text-xs font-medium">Revisão Ativa</span>
-              <Sparkles className="w-4 h-4 text-purple-400" />
-            </div>
-            <div className="text-2xl font-bold text-white">Flashcards</div>
-            <p className="text-[11px] text-slate-500">Repetição espaçada com IA</p>
+          <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-2xl">
+            <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5 mb-1">
+              <Sparkles className="w-3.5 h-3.5 text-purple-400" /> Revisão Ativa
+            </span>
+            <p className="text-xl font-extrabold text-white">Flashcards</p>
+            <span className="text-[11px] text-slate-500 mt-1 block">Repetição espaçada com IA</span>
           </div>
 
-          <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl space-y-2">
-            <div className="flex items-center justify-between text-slate-400">
-              <span className="text-xs font-medium">Retenção de Prova</span>
-              <Award className="w-4 h-4 text-amber-400" />
-            </div>
-            <div className="text-2xl font-bold text-white">Simulados</div>
-            <p className="text-[11px] text-slate-500">Gabarito comentado</p>
+          <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-2xl">
+            <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5 mb-1">
+              <Award className="w-3.5 h-3.5 text-amber-400" /> Retenção de Prova
+            </span>
+            <p className="text-xl font-extrabold text-white">Simulados</p>
+            <span className="text-[11px] text-slate-500 mt-1 block">Gabarito e nota imediata</span>
           </div>
 
-          <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl space-y-2">
-            <div className="flex items-center justify-between text-slate-400">
-              <span className="text-xs font-medium">Precisão da IA</span>
-              <Flame className="w-4 h-4 text-emerald-400" />
-            </div>
-            <div className="text-2xl font-bold text-white">100%</div>
-            <p className="text-[11px] text-slate-500">Classificação contextual</p>
+          <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-2xl">
+            <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5 mb-1">
+              <Presentation className="w-3.5 h-3.5 text-emerald-400" /> Apresentações
+            </span>
+            <p className="text-xl font-extrabold text-white">PowerPoint</p>
+            <span className="text-[11px] text-slate-500 mt-1 block">Exporta .pptx + Roteiro</span>
           </div>
-        </section>
+        </div>
 
-        {/* Módulos do Sistema */}
-        <section className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold text-white flex items-center gap-2">
-              <Layers className="w-5 h-5 text-indigo-400" /> Recursos Disponíveis
-            </h2>
-          </div>
+        {/* CARDS DE RECURSOS */}
+        <div className="space-y-4">
+          <h2 className="text-sm font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+            <Layers className="w-4 h-4 text-indigo-400" /> Recursos Disponíveis
+          </h2>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            
-            {/* Card 1: Reconhecimento de Voz */}
-            <div className="bg-slate-900 border border-slate-800 hover:border-indigo-500/40 p-6 rounded-2xl space-y-3 transition group">
-              <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center border border-indigo-500/20 group-hover:scale-105 transition">
-                <Mic className="w-5 h-5" />
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Card 1: Escuta & Modo Discreto */}
+            <div className="bg-slate-900/60 border border-slate-800 hover:border-slate-700 p-6 rounded-2xl flex flex-col justify-between space-y-4 transition">
+              <div className="space-y-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center">
+                  <Mic className="w-5 h-5" />
+                </div>
+                <h3 className="text-base font-bold text-white">Escuta & Modo Discreto</h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Microfone em tempo real ou upload de áudio com tela preta AMOLED para não chamar atenção na sala de aula.
+                </p>
               </div>
-              <h3 className="font-bold text-white text-base">Escuta Inteligente</h3>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Microfone integrado no navegador com detecção de matéria e extração em tempo real de tarefas e alertas de prova.
-              </p>
-              <Link href="/aula" className="text-xs font-semibold text-indigo-400 hover:text-indigo-300 inline-flex items-center gap-1 pt-2">
-                Iniciar escuta <ChevronRight className="w-3.5 h-3.5" />
+              <Link href="/aula" className="text-xs font-semibold text-indigo-400 hover:text-indigo-300 flex items-center gap-1 pt-2">
+                Iniciar escuta <ArrowRight className="w-3.5 h-3.5" />
               </Link>
             </div>
 
-            {/* Card 2: Multi-Formatos */}
-            <div className="bg-slate-900 border border-slate-800 hover:border-purple-500/40 p-6 rounded-2xl space-y-3 transition group">
-              <div className="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-400 flex items-center justify-center border border-purple-500/20 group-hover:scale-105 transition">
-                <BrainCircuit className="w-5 h-5" />
+            {/* Card 2: Formatos Pedagógicos */}
+            <div className="bg-slate-900/60 border border-slate-800 hover:border-slate-700 p-6 rounded-2xl flex flex-col justify-between space-y-4 transition">
+              <div className="space-y-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center justify-center">
+                  <BrainCircuit className="w-5 h-5" />
+                </div>
+                <h3 className="text-base font-bold text-white">Multi-Formatos Pedagógicos</h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Geração automática de Mapas Mentais conceituais, Tabelas Comparativas completas ou Resumos Estruturados.
+                </p>
               </div>
-              <h3 className="font-bold text-white text-base">Multi-Formatos Pedagógicos</h3>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Gere automaticamente Mapas Mentais com conexões conceituais, Tabelas Comparativas completas ou Resumos em tópicos.
-              </p>
-              <Link href="/aula" className="text-xs font-semibold text-purple-400 hover:text-purple-300 inline-flex items-center gap-1 pt-2">
-                Ver formatos <ChevronRight className="w-3.5 h-3.5" />
+              <Link href="/anotacoes" className="text-xs font-semibold text-purple-400 hover:text-purple-300 flex items-center gap-1 pt-2">
+                Ver formatos <ArrowRight className="w-3.5 h-3.5" />
               </Link>
             </div>
 
-            {/* Card 3: Estudo Ativo */}
-            <div className="bg-slate-900 border border-slate-800 hover:border-amber-500/40 p-6 rounded-2xl space-y-3 transition group">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center border border-amber-500/20 group-hover:scale-105 transition">
-                <Award className="w-5 h-5" />
+            {/* Card 3: Flashcards & Simulados */}
+            <div className="bg-slate-900/60 border border-slate-800 hover:border-slate-700 p-6 rounded-2xl flex flex-col justify-between space-y-4 transition">
+              <div className="space-y-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center">
+                  <Award className="w-5 h-5" />
+                </div>
+                <h3 className="text-base font-bold text-white">Flashcards & Simulados</h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Transforme qualquer aula salva em cartões interativos de memorização ativa ou faça simulados com correção.
+                </p>
               </div>
-              <h3 className="font-bold text-white text-base">Flashcards & Simulados</h3>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Transforme qualquer aula salva em cartões interativos de memorização ou faça simulados de múltipla escolha com nota e correção.
-              </p>
-              <Link href="/anotacoes" className="text-xs font-semibold text-amber-400 hover:text-amber-300 inline-flex items-center gap-1 pt-2">
-                Praticar agora <ChevronRight className="w-3.5 h-3.5" />
+              <Link href="/anotacoes" className="text-xs font-semibold text-amber-400 hover:text-amber-300 flex items-center gap-1 pt-2">
+                Praticar agora <ArrowRight className="w-3.5 h-3.5" />
               </Link>
             </div>
 
+            {/* Card 4: Slides PowerPoint */}
+            <div className="bg-slate-900/60 border border-slate-800 hover:border-slate-700 p-6 rounded-2xl flex flex-col justify-between space-y-4 transition">
+              <div className="space-y-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center">
+                  <Presentation className="w-5 h-5" />
+                </div>
+                <h3 className="text-base font-bold text-white">Seminários & Slides (.pptx)</h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Monte apresentações completas com roteiro de fala para o orador e baixe diretamente no formato PowerPoint.
+                </p>
+              </div>
+              <Link href="/anotacoes" className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 pt-2">
+                Gerar slides <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
           </div>
-        </section>
+        </div>
 
-        {/* Anotações Recentes */}
+        {/* ANOTAÇÕES RECENTES */}
         {recentNotes.length > 0 && (
-          <section className="space-y-4 pt-4 border-t border-slate-800">
+          <div className="space-y-4 pt-4 border-t border-slate-800/80">
             <div className="flex items-center justify-between">
-              <h2 className="text-base font-bold text-white flex items-center gap-2">
-                <Clock className="w-4 h-4 text-indigo-400" /> Suas Anotações Recentes
+              <h2 className="text-sm font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+                <BookOpen className="w-4 h-4 text-indigo-400" /> Suas Anotações Recentes
               </h2>
-              <Link href="/anotacoes" className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold">
-                Ver todas ({totalNotes}) &rarr;
+              <Link href="/anotacoes" className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1">
+                Ver todas ({totalNotes}) <ArrowRight className="w-3.5 h-3.5" />
               </Link>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               {recentNotes.map((note) => (
-                <Link 
+                <Link
                   key={note.id}
                   href="/anotacoes"
-                  className="bg-slate-900/60 hover:bg-slate-900 border border-slate-800 hover:border-slate-700 p-4 rounded-xl transition flex flex-col justify-between space-y-3"
+                  className="bg-slate-900/50 border border-slate-800 hover:border-indigo-500/40 p-4 rounded-2xl transition space-y-2 group block"
                 >
-                  <div>
-                    <span className="text-[10px] font-semibold bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 px-2 py-0.5 rounded">
-                      {note.subject}
-                    </span>
-                    <h4 className="text-sm font-semibold text-slate-200 mt-2 line-clamp-1">{note.title}</h4>
-                  </div>
-                  <span className="text-[11px] text-slate-500">{note.date}</span>
+                  <span className="text-[10px] font-bold uppercase tracking-wider bg-indigo-500/10 text-indigo-400 px-2 py-0.5 rounded border border-indigo-500/20">
+                    {note.subject}
+                  </span>
+                  <h4 className="text-xs font-bold text-white group-hover:text-indigo-300 transition truncate">
+                    {note.title}
+                  </h4>
+                  <p className="text-[11px] text-slate-500">{note.date}</p>
                 </Link>
               ))}
             </div>
-          </section>
+          </div>
         )}
-
       </main>
 
-      {/* Rodapé */}
+      {/* RODAPÉ */}
       <footer className="border-t border-slate-800/80 py-6 text-center text-xs text-slate-500">
-        <p>NOTAÍ • Inteligência Artificial em Sala de Aula &copy; 2026</p>
+        NOTAÍ • Inteligência Artificial em Tempo Real para Alunos e Concurseiros
       </footer>
-
     </div>
   );
 }
