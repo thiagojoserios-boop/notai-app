@@ -42,7 +42,7 @@ export async function POST(request: Request) {
         },
         payment_methods: {
           excluded_payment_types: [
-            { id: 'ticket' } // Remove Boleto Bancário
+            { id: 'ticket' } // Exclui boleto bancário (foco em Pix e Cartão)
           ],
           installments: 12,
         },
@@ -53,7 +53,7 @@ export async function POST(request: Request) {
           pending: `${origin}/planos?upgrade=pending`,
         },
         auto_return: 'approved',
-        notification_url: `${origin}/api/webhook/mercadopago`,
+        notification_url: `${origin}/api/webhooks/mercadopago`,
       },
     });
 
