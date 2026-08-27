@@ -3,37 +3,31 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Check, Sparkles, Zap, Crown, ArrowLeft, 
-  ShieldCheck, Presentation, BrainCircuit, Mic, HelpCircle, 
-  ChevronRight, CreditCard, QrCode, Lock
+  ShieldCheck, Presentation, BrainCircuit, Mic, 
+  CreditCard, QrCode, Loader2
 } from 'lucide-react';
 import Link from 'next/link';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import AuthModal from '@/components/AuthModal';
-
-// Configure aqui seus links diretos do Mercado Pago, Stripe ou Asaas
-const CHECKOUT_LINKS = {
-  plus: {
-    monthly: 'https://mpago.la/SEU_LINK_PLUS_MENSAL', // ou link da Stripe / Asaas
-    yearly: 'https://mpago.la/SEU_LINK_PLUS_ANUAL',
-  },
-  pro: {
-    monthly: 'https://mpago.la/SEU_LINK_PRO_MENSAL',
-    yearly: 'https://mpago.la/SEU_LINK_PRO_ANUAL',
-  },
-};
 
 export default function PlansPage() {
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [selectedPlanToBuy, setSelectedPlanToBuy] = useState<string | null>(null);
+  const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
 
   useEffect(() => {
     async function getUser() {
       if (isSupabaseConfigured && supabase) {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
-          const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+          const { data } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', user.id)
+            .single();
+
           setCurrentUser(data || { id: user.id, email: user.email, plan: 'free' });
         }
       }
@@ -41,15 +35,15 @@ export default function PlansPage() {
     getUser();
   }, []);
 
-  const handleSelectPlan = (planKey: string) => {
-    // 1. Se o usuário não estiver logado, abre modal de login/cadastro primeiro
+  const handleSelectPlan = async (planKey: string) => {
+    // 1. Se não estiver logado, abre o modal de autenticação
     if (!currentUser) {
       setSelectedPlanToBuy(planKey);
       setShowAuthModal(true);
       return;
     }
 
-    // 2. Se clicar no plano gratuito
+    // 2. Se selecionar o plano gratuito
     if (planKey === 'free') {
       if (currentUser?.plan === 'free') {
         alert('Você já está utilizando o Plano Gratuito!');
@@ -59,25 +53,45 @@ export default function PlansPage() {
       return;
     }
 
-    // 3. Obter link de checkout de acordo com o plano e periodicidade
-    const targetLink = CHECKOUT_LINKS[planKey as keyof typeof CHECKOUT_LINKS]?.[billingCycle];
+    // 3. Se já estiver no plano selecionado
+    if (currentUser?.plan === planKey) {
+      alert(`Você já é assinante do Plano ${planKey.toUpperCase()}!`);
+      return;
+    }
 
-    if (targetLink && !targetLink.includes('SEU_LINK_')) {
-      // Redireciona para o checkout com identificador do usuário
-      const separator = targetLink.includes('?') ? '&' : '?';
-      window.location.href = `${targetLink}${separator}client_reference_id=${currentUser.id}&customer_email=${encodeURIComponent(currentUser.email || '')}`;
-    } else {
-      // Caso ainda não tenha colado os links reais
-      alert(
-        `Plano ${planKey.toUpperCase()} (${billingCycle === 'yearly' ? 'Anual' : 'Mensal'}) selecionado!\n\nPara ativar o recebimento real, insira seu link de pagamento do Mercado Pago ou Stripe no objeto CHECKOUT_LINKS em src/app/planos/page.tsx.`
-      );
+    // 4. Inicia requisição para a rota de checkout do Mercado Pago
+    try {
+      setLoadingPlan(planKey);
+      const res = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          planKey,
+          billingCycle,
+          userId: currentUser.id,
+          userEmail: currentUser.email,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (data.init_point) {
+        window.location.href = data.init_point; // Redireciona para o checkout do Mercado Pago (Pix/Cartão)
+      } else {
+        alert(data.error || 'Não foi possível gerar a sessão de pagamento.');
+      }
+    } catch (err) {
+      console.error('Erro no checkout:', err);
+      alert('Erro de conexão ao processar o pagamento. Tente novamente.');
+    } finally {
+      setLoadingPlan(null);
     }
   };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between p-6 md:p-10">
       
-      {/* Modal de Login / Registro */}
+      {/* Modal de Autenticação */}
       <AuthModal
         isOpen={showAuthModal}
         onClose={() => setShowAuthModal(false)}
@@ -92,7 +106,7 @@ export default function PlansPage() {
           <ArrowLeft className="w-4 h-4" /> Voltar ao Início
         </Link>
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center">
+          <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-600/30">
             <Sparkles className="w-4 h-4 text-white" />
           </div>
           <span className="font-bold text-sm tracking-tight text-white">NOTAÍ Planos</span>
@@ -235,9 +249,16 @@ export default function PlansPage() {
 
             <button
               onClick={() => handleSelectPlan('plus')}
-              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-3.5 rounded-xl transition shadow-xl shadow-indigo-600/40 flex items-center justify-center gap-2 cursor-pointer"
+              disabled={loadingPlan === 'plus'}
+              className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold py-3.5 rounded-xl transition shadow-xl shadow-indigo-600/40 flex items-center justify-center gap-2 cursor-pointer"
             >
-              {currentUser?.plan === 'plus' ? 'Seu Plano Atual' : (
+              {loadingPlan === 'plus' ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" /> Gerando Pagamento...
+                </>
+              ) : currentUser?.plan === 'plus' ? (
+                'Seu Plano Atual'
+              ) : (
                 <>
                   <Zap className="w-4 h-4" /> Assinar Plano Plus
                 </>
@@ -285,9 +306,16 @@ export default function PlansPage() {
 
             <button
               onClick={() => handleSelectPlan('pro')}
-              className="w-full bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 text-xs font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer"
+              disabled={loadingPlan === 'pro'}
+              className="w-full bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-amber-300 border border-amber-500/30 text-xs font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer"
             >
-              {currentUser?.plan === 'pro' ? 'Seu Plano Atual' : (
+              {loadingPlan === 'pro' ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" /> Gerando Pagamento...
+                </>
+              ) : currentUser?.plan === 'pro' ? (
+                'Seu Plano Atual'
+              ) : (
                 <>
                   <Crown className="w-4 h-4" /> Assinar Pro Concursos
                 </>
@@ -317,7 +345,7 @@ export default function PlansPage() {
 
       {/* Rodapé */}
       <footer className="max-w-6xl mx-auto w-full pt-8 text-center text-xs text-slate-500 border-t border-slate-800/80">
-        NOTAÍ • Pagamentos processados de forma segura e criptografada.
+        NOTAÍ • Pagamentos processados com segurança pelo Mercado Pago.
       </footer>
     </div>
   );
