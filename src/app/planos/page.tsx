@@ -7,10 +7,15 @@ import {
   CreditCard, QrCode, Loader2
 } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import AuthModal from '@/components/AuthModal';
 
 export default function PlansPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectTarget = searchParams.get('redirect') || '/aula';
+
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -36,30 +41,26 @@ export default function PlansPage() {
   }, []);
 
   const handleSelectPlan = async (planKey: string) => {
-    // 1. Se não estiver logado, abre o modal de autenticação
+    // 1. Se não estiver logado, abre modal de login
     if (!currentUser) {
       setSelectedPlanToBuy(planKey);
       setShowAuthModal(true);
       return;
     }
 
-    // 2. Se selecionar o plano gratuito
+    // 2. Se for o plano gratuito e o usuário já está logado
     if (planKey === 'free') {
-      if (currentUser?.plan === 'free') {
-        alert('Você já está utilizando o Plano Gratuito!');
-      } else {
-        alert('Sua conta já possui um plano superior ativo.');
-      }
+      router.push(redirectTarget);
       return;
     }
 
-    // 3. Se já estiver no plano selecionado
+    // 3. Se já for assinante desse mesmo plano
     if (currentUser?.plan === planKey) {
-      alert(`Você já é assinante do Plano ${planKey.toUpperCase()}!`);
+      router.push(redirectTarget);
       return;
     }
 
-    // 4. Inicia requisição para a rota de checkout do Mercado Pago
+    // 4. Inicia checkout no Mercado Pago
     try {
       setLoadingPlan(planKey);
       const res = await fetch('/api/checkout', {
@@ -76,15 +77,25 @@ export default function PlansPage() {
       const data = await res.json();
 
       if (data.init_point) {
-        window.location.href = data.init_point; // Redireciona para o checkout do Mercado Pago (Pix/Cartão)
+        window.location.href = data.init_point;
       } else {
         alert(data.error || 'Não foi possível gerar a sessão de pagamento.');
       }
     } catch (err) {
       console.error('Erro no checkout:', err);
-      alert('Erro de conexão ao processar o pagamento. Tente novamente.');
+      alert('Erro de conexão ao processar pagamento.');
     } finally {
       setLoadingPlan(null);
+    }
+  };
+
+  const handleAuthSuccess = () => {
+    setShowAuthModal(false);
+    if (selectedPlanToBuy === 'free' || !selectedPlanToBuy) {
+      router.push(redirectTarget);
+    } else {
+      // Se ele clicou em Plus/Pro antes de logar, recarrega para pegar a sessão e ir pro checkout
+      window.location.reload();
     }
   };
 
@@ -95,12 +106,10 @@ export default function PlansPage() {
       <AuthModal
         isOpen={showAuthModal}
         onClose={() => setShowAuthModal(false)}
-        onSuccess={() => {
-          if (typeof window !== 'undefined') window.location.reload();
-        }}
+        onSuccess={handleAuthSuccess}
       />
 
-      {/* Topo / Navegação */}
+      {/* Topo */}
       <header className="max-w-6xl mx-auto w-full flex items-center justify-between pb-8">
         <Link href="/" className="flex items-center gap-2 text-xs text-slate-400 hover:text-white transition">
           <ArrowLeft className="w-4 h-4" /> Voltar ao Início
@@ -113,7 +122,7 @@ export default function PlansPage() {
         </div>
       </header>
 
-      {/* Seção Principal de Preços */}
+      {/* Preços */}
       <main className="max-w-6xl mx-auto w-full space-y-10 flex-1">
         <div className="text-center space-y-3 max-w-2xl mx-auto">
           <span className="text-xs font-bold uppercase tracking-wider bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-3 py-1 rounded-full inline-block">
@@ -148,10 +157,10 @@ export default function PlansPage() {
           </div>
         </div>
 
-        {/* Grid dos Planos */}
+        {/* Cards de Preços */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
           
-          {/* PLANO 1: GRATUITO */}
+          {/* GRATUITO */}
           <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 md:p-8 flex flex-col justify-between space-y-6">
             <div className="space-y-4">
               <div className="space-y-1">
@@ -187,17 +196,13 @@ export default function PlansPage() {
 
             <button
               onClick={() => handleSelectPlan('free')}
-              className={`w-full text-xs font-semibold py-3 rounded-xl transition ${
-                currentUser?.plan === 'free'
-                  ? 'bg-slate-800/50 text-slate-400 border border-slate-700/50 cursor-default'
-                  : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
-              }`}
+              className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold py-3 rounded-xl transition cursor-pointer"
             >
-              {currentUser?.plan === 'free' ? 'Plano Atual' : 'Começar Grátis'}
+              {currentUser ? 'Continuar no Plano Grátis' : 'Começar Grátis'}
             </button>
           </div>
 
-          {/* PLANO 2: PLUS UNIVERSITÁRIO (DESTAQUE) */}
+          {/* PLUS */}
           <div className="bg-gradient-to-b from-indigo-950/80 to-slate-900 border-2 border-indigo-500 rounded-3xl p-6 md:p-8 flex flex-col justify-between space-y-6 shadow-2xl relative">
             <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest px-3.5 py-1 rounded-full shadow-lg border border-indigo-400/30">
               Mais Escolhido
@@ -266,7 +271,7 @@ export default function PlansPage() {
             </button>
           </div>
 
-          {/* PLANO 3: PRO CONCURSOS */}
+          {/* PRO */}
           <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 md:p-8 flex flex-col justify-between space-y-6">
             <div className="space-y-4">
               <div className="space-y-1">
@@ -325,7 +330,7 @@ export default function PlansPage() {
 
         </div>
 
-        {/* Métodos de Pagamento e Garantia */}
+        {/* Garantia */}
         <div className="max-w-3xl mx-auto bg-slate-900/40 border border-slate-800 rounded-2xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-400">
           <div className="flex items-center gap-3">
             <ShieldCheck className="w-6 h-6 text-emerald-400 shrink-0" />
@@ -340,10 +345,9 @@ export default function PlansPage() {
             <span className="flex items-center gap-1"><CreditCard className="w-4 h-4 text-indigo-400" /> Cartão de Crédito</span>
           </div>
         </div>
-
       </main>
 
-      {/* Rodapé */}
+      {/* Footer */}
       <footer className="max-w-6xl mx-auto w-full pt-8 text-center text-xs text-slate-500 border-t border-slate-800/80">
         NOTAÍ • Pagamentos processados com segurança pelo Mercado Pago.
       </footer>
