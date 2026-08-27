@@ -94,6 +94,13 @@ export default function HomePage() {
             </Link>
 
             <Link
+              href="/planos"
+              className="text-xs font-semibold text-amber-300 hover:text-amber-200 bg-amber-500/10 border border-amber-500/30 px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 hover:bg-amber-500/20"
+            >
+              <Zap className="w-3.5 h-3.5 text-amber-400" /> Planos & Upgrade
+            </Link>
+
+            <Link
               href="/aula"
               className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow-lg shadow-indigo-600/20"
             >
