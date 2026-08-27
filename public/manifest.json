@@ -1,0 +1,22 @@
+{
+  "name": "NOTAÍ - IA para Sala de Aula",
+  "short_name": "NOTAÍ",
+  "description": "Grave aulas, transcreva, crie mapas mentais e simulados com IA.",
+  "start_url": "/aula",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#4f46e5",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

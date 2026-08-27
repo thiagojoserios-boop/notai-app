@@ -4,7 +4,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Sparkles, BookOpen, AlertTriangle, ArrowLeft, 
   CheckCircle, BrainCircuit, X, Download, Share2, Layers, HelpCircle, Send, PlayCircle, Loader2,
-  Table as TableIcon, FileText, Check, Mic, MicOff, Volume2, Printer, UploadCloud, Music, FileAudio
+  Table as TableIcon, FileText, Check, Mic, MicOff, Volume2, Printer, UploadCloud, Music, FileAudio,
+  EyeOff, Lock, Unlock, Clock
 } from 'lucide-react';
 import Link from 'next/link';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
@@ -46,6 +47,11 @@ export default function LiveClass() {
   const [quickAnswer, setQuickAnswer] = useState<string | null>(null);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
+  // Modo Discreto / Tela Oculta
+  const [isStealthMode, setIsStealthMode] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [currentTime, setCurrentTime] = useState('');
+
   // Estados do Microfone
   const [isListening, setIsListening] = useState(false);
   const [interimText, setInterimText] = useState('');
@@ -56,6 +62,30 @@ export default function LiveClass() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadLoading, setUploadLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Atualização do Relógio do Modo Discreto
+  useEffect(() => {
+    const updateClock = () => {
+      const now = new Date();
+      setCurrentTime(now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
+    };
+    updateClock();
+    const interval = setInterval(updateClock, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Cronômetro de Gravação
+  useEffect(() => {
+    let timer: any;
+    if (isListening) {
+      timer = setInterval(() => {
+        setElapsedSeconds((prev) => prev + 1);
+      }, 1000);
+    } else {
+      setElapsedSeconds(0);
+    }
+    return () => clearInterval(timer);
+  }, [isListening]);
 
   useEffect(() => {
     const SpeechRecognition =
@@ -132,6 +162,12 @@ export default function LiveClass() {
         console.error('Erro ao iniciar microfone:', err);
       }
     }
+  };
+
+  const formatTimer = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
   const processWithAI = async (text: string) => {
@@ -356,7 +392,7 @@ export default function LiveClass() {
             🧠 ${detectedActivity.topic}
           </div>
         </div>
-        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 20px;">
+        <div style="grid-template-columns: repeat(2, 1fr); display: grid; gap: 16px; margin-top: 20px;">
           ${detectedActivity.nodes.map((n) => `
             <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 16px;">
               <h4 style="color: #4f46e5; margin: 0 0 10px 0; text-transform: uppercase; font-size: 13px; font-weight: bold;">${n.category}</h4>
@@ -443,7 +479,44 @@ export default function LiveClass() {
   return (
     <div className="flex flex-col min-h-screen bg-slate-950 text-slate-100 p-6 md:p-8">
       
-      {/* Topo com Seleção de Modo (Ao Vivo vs Upload) */}
+      {/* OVERLAY: MODO DISCRETO / TELA APAGADA (OLED PURA) */}
+      {isStealthMode && (
+        <div 
+          onDoubleClick={() => setIsStealthMode(false)}
+          className="fixed inset-0 z-[999] bg-black flex flex-col justify-between p-8 select-none cursor-pointer"
+        >
+          {/* Topo do Modo Discreto */}
+          <div className="flex items-center justify-between text-neutral-800 text-xs font-mono">
+            <span className="flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full ${isListening ? 'bg-red-900 animate-ping' : 'bg-neutral-800'}`} />
+              {isListening ? 'GRAVANDO' : 'PAUSADO'}
+            </span>
+            <span>{formatTimer(elapsedSeconds)}</span>
+          </div>
+
+          {/* Centro Minimalista: Apenas relógio e indicação sutil */}
+          <div className="text-center space-y-3">
+            <h1 className="text-4xl md:text-6xl font-light text-neutral-800 font-mono tracking-widest">
+              {currentTime}
+            </h1>
+            <p className="text-[10px] text-neutral-800 uppercase tracking-widest">
+              Modo Discreto Ativo
+            </p>
+          </div>
+
+          {/* Rodapé: Instrução para sair */}
+          <div className="text-center">
+            <button
+              onClick={() => setIsStealthMode(false)}
+              className="text-[11px] text-neutral-700 bg-neutral-950 border border-neutral-900 px-4 py-2 rounded-full hover:text-neutral-400 transition"
+            >
+              Toque 2x na tela para desbloquear
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Topo Principal */}
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4 mb-6">
         <div className="flex items-center gap-4">
           <Link href="/" className="p-2 hover:bg-slate-900 rounded-lg text-slate-400 hover:text-white transition">
@@ -455,7 +528,7 @@ export default function LiveClass() {
               Sala de Aula Inteligente
             </h1>
             <p className="text-xs text-slate-400">
-              {activeTab === 'live' ? 'Captura ao vivo via microfone ou texto' : 'Processamento completo de gravação de áudio'}
+              {activeTab === 'live' ? 'Captura contínua ou manual em sala' : 'Processamento completo de gravação de áudio'}
             </p>
           </div>
         </div>
@@ -485,24 +558,35 @@ export default function LiveClass() {
           </div>
 
           {activeTab === 'live' && speechSupported && (
-            <button
-              onClick={toggleListening}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold shadow-lg transition select-none ${
-                isListening
-                  ? 'bg-red-600 hover:bg-red-500 text-white shadow-red-600/30 animate-pulse'
-                  : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/20'
-              }`}
-            >
-              {isListening ? (
-                <>
-                  <MicOff className="w-4 h-4" /> Parar Escuta
-                </>
-              ) : (
-                <>
-                  <Mic className="w-4 h-4" /> Ativar Microfone
-                </>
-              )}
-            </button>
+            <>
+              <button
+                onClick={toggleListening}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold shadow-lg transition select-none ${
+                  isListening
+                    ? 'bg-red-600 hover:bg-red-500 text-white shadow-red-600/30 animate-pulse'
+                    : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/20'
+                }`}
+              >
+                {isListening ? (
+                  <>
+                    <MicOff className="w-4 h-4" /> Parar ({formatTimer(elapsedSeconds)})
+                  </>
+                ) : (
+                  <>
+                    <Mic className="w-4 h-4" /> Gravar Aula
+                  </>
+                )}
+              </button>
+
+              {/* Botão de Ativação do Modo Discreto */}
+              <button
+                onClick={() => setIsStealthMode(true)}
+                title="Modo Discreto: escurece a tela para economizar bateria e não chamar atenção na aula"
+                className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 px-3 py-2 rounded-xl text-xs transition font-medium"
+              >
+                <EyeOff className="w-3.5 h-3.5 text-slate-400" /> Modo Discreto
+              </button>
+            </>
           )}
 
           <Link 
